@@ -78,20 +78,20 @@ export function Sidebar() {
       {/* White Navigation Column */}
       <div className="w-44 bg-white border-r border-gray-200 flex flex-col">
         {/* Header with Logo and Title */}
-        <div className="px-3 py-3 border-b border-gray-200">
+        <div className="px-3 py-2.5 border-b border-gray-200">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-black rounded-md flex items-center justify-center flex-shrink-0">
-              <img src="/risa-logo.svg" alt="RISA" className="w-7 h-7" />
+            <div className="w-7 h-7 bg-black rounded-md flex items-center justify-center flex-shrink-0">
+              <img src="/risa-logo.svg" alt="RISA" className="w-6 h-6" />
             </div>
-            <span className="font-semibold text-gray-900 text-sm leading-tight">RISA Claims Dashboard</span>
+            <span className="font-semibold text-gray-900 text-xs leading-tight">RISA Claims Dashboard</span>
           </div>
         </div>
 
         {/* Worklists Header */}
-        <div className="px-4 py-3">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-gray-900 text-sm">Worklists</span>
-            <FileText className="h-4 w-4 text-gray-400" />
+        <div className="px-4 py-2.5">
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold text-gray-900 text-xs">Worklists</span>
+            <FileText className="h-3.5 w-3.5 text-gray-400" />
           </div>
         </div>
 
@@ -104,7 +104,7 @@ export function Sidebar() {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  'flex items-center justify-between px-4 py-2 text-sm transition-colors',
+                  'flex items-center justify-between px-4 py-1.5 text-xs transition-colors',
                   isActive
                     ? 'bg-gray-50 text-gray-900 font-medium'
                     : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
@@ -112,7 +112,7 @@ export function Sidebar() {
               >
                 <span>{item.label}</span>
                 {item.badge && (
-                  <span className="bg-yellow-400 text-yellow-900 text-xs font-medium px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
+                  <span className="bg-yellow-400 text-yellow-900 text-[10px] font-medium px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
                     {item.badge}
                   </span>
                 )}
