@@ -7,8 +7,13 @@ import { Toaster } from '@/components/ui/toaster'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Claims Dashboard',
+  title: 'RISA Claims Dashboard',
   description: 'Claims Processing Dashboard',
+  icons: {
+    icon: '/risa-logo.svg',
+    shortcut: '/risa-logo.svg',
+    apple: '/risa-logo.svg',
+  },
 }
 
 export default function RootLayout({
