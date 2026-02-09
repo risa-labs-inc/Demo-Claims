@@ -20,7 +20,7 @@ interface FilterModalProps {
 }
 
 export interface FilterState {
-  dateOfService: { from: string; to: string } | null
+  dateOfService: { from: string; to: string; fromDisplay?: string; toDisplay?: string } | null
   primaryPlan: string[]
   provider: string[]
   secondaryPlan: string[]
@@ -122,7 +122,7 @@ export function FilterModal({ isOpen, onClose, onApply, initialFilters, users, p
           to: prev.dateOfService?.to || '',
           fromDisplay: dateStr,
           toDisplay: prev.dateOfService?.toDisplay || ''
-        } as any
+        }
       }))
       setSelectingDate('to')
     } else if (selectingDate === 'to') {
@@ -131,9 +131,9 @@ export function FilterModal({ isOpen, onClose, onApply, initialFilters, users, p
         dateOfService: {
           from: prev.dateOfService?.from || '',
           to: isoStr,
-          fromDisplay: (prev.dateOfService as any)?.fromDisplay || '',
+          fromDisplay: prev.dateOfService?.fromDisplay || '',
           toDisplay: dateStr
-        } as any
+        }
       }))
       setSelectingDate(null)
     }
@@ -187,7 +187,7 @@ export function FilterModal({ isOpen, onClose, onApply, initialFilters, users, p
                     selectingDate === 'from' ? 'border-gray-900' : 'border-gray-300'
                   )}
                 >
-                  {(filters.dateOfService as any)?.fromDisplay || filters.dateOfService?.from || 'Select date'}
+                  {filters.dateOfService?.fromDisplay || filters.dateOfService?.from || 'Select date'}
                 </button>
               </div>
               <div>
@@ -199,7 +199,7 @@ export function FilterModal({ isOpen, onClose, onApply, initialFilters, users, p
                     selectingDate === 'to' ? 'border-gray-900' : 'border-gray-300'
                   )}
                 >
-                  {(filters.dateOfService as any)?.toDisplay || filters.dateOfService?.to || 'Select date'}
+                  {filters.dateOfService?.toDisplay || filters.dateOfService?.to || 'Select date'}
                 </button>
               </div>
             </div>
