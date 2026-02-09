@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "rapids-platform"
+  },
+  "targets": {
+    "rapids-platform": {
+      "hosting": {
+        "risa-claims-demo": [
+          "risa-claims-demo"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  claims    Claim[]  @relation("AssignedClaims")
+  createdAt DateTime @default(now())
+}
+
+model Claim {
+  id String @id @default(cuid())
+
+  // Patient Info
+  patientFirstName String
+  patientLastName  String
+  mrn              String
+  dateOfBirth      DateTime
+
+  // Service Info
+  dateOfService DateTime
+  chargeAmount  Decimal
+
+  // Insurance Info
+  primaryInsurance   String
+  primaryMemberId    String
+  secondaryInsurance String?
+  secondaryMemberId  String?
+
+  // Provider Info
+  providerFirstName String
+  providerLastName  String
+  providerNpi       String
+
+  // Claim Processing
+  claimId     String
+  stage       String  @default("PENDING")
+  claimStatus String?
+
+  // Claim Details (populated by automation or manual entry)
+  claimNumber       String?
+  claimReceivedDate DateTime?
+
+  // Payment Details
+  checkNumber String?
+  checkDate   DateTime?
+  paidAmount  Decimal?
+  paymentDate DateTime?
+
+  // Denial Details
+  denialCodes       String?
+  deniedLineItems   String?
+  denialDescription String?
+
+  // Remarks
+  remarks String?
+
+  // Secondary Insurance Claim Details
+  secondaryClaimNumber       String?
+  secondaryClaimReceivedDate DateTime?
+  secondaryClaimStatus       String?
+  secondaryCheckNumber       String?
+  secondaryCheckDate         DateTime?
+  secondaryPaidAmount        Decimal?
+  secondaryPaymentDate       DateTime?
+  secondaryDenialCodes       String?
+  secondaryDeniedLineItems   String?
+  secondaryDenialDescription String?
+  secondaryRemarks           String?
+
+  // Assignment
+  assignedToId String?
+  assignedTo   User?   @relation("AssignedClaims", fields: [assignedToId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

@@ -1,0 +1,20 @@
+{
+  "hosting": {
+    "target": "risa-claims-demo",
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "run": {
+          "serviceId": "risa-claims-demo",
+          "region": "us-central1"
+        }
+      }
+    ]
+  }
+}

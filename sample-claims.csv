@@ -1,0 +1,11 @@
+Patient First Name,Patient Last Name,MRN,Date of Birth,Date of Service,Charge Amount,Primary Insurance,Primary Member ID,Secondary Insurance,Secondary Member ID,Provider First Name,Provider Last Name,Provider NPI,Claim ID
+"Alice","Johnson","MRN001001","1985-03-15","2024-01-15","1250.00","Blue Cross Blue Shield","MBR1234567","","","Dr. Robert","Williams","1234567890","CLM2001"
+"Bob","Smith","MRN001002","1972-08-22","2024-01-16","875.50","Aetna","MBR2345678","Medicare","MBR8765432","Dr. Sarah","Johnson","2345678901","CLM2002"
+"Carol","Davis","MRN001003","1990-11-30","2024-01-17","2100.00","UnitedHealthcare","MBR3456789","","","Dr. Michael","Brown","3456789012","CLM2003"
+"Daniel","Brown","MRN001004","1968-05-10","2024-01-18","450.75","Cigna","MBR4567890","Medicaid","MBR9876543","Dr. Emily","Davis","4567890123","CLM2004"
+"Eva","Wilson","MRN001005","1995-02-28","2024-01-19","3200.00","Humana","MBR5678901","","","Dr. Robert","Williams","1234567890","CLM2005"
+"Frank","Taylor","MRN001006","1980-07-14","2024-01-20","675.25","Kaiser Permanente","MBR6789012","","","Dr. Sarah","Johnson","2345678901","CLM2006"
+"Grace","Anderson","MRN001007","1955-12-05","2024-01-21","1890.00","Medicare","MBR7890123","Blue Cross Blue Shield","MBR1112233","Dr. Michael","Brown","3456789012","CLM2007"
+"Henry","Thomas","MRN001008","1988-09-18","2024-01-22","520.00","Aetna","MBR8901234","","","Dr. Emily","Davis","4567890123","CLM2008"
+"Ivy","Jackson","MRN001009","1975-04-25","2024-01-23","1450.50","UnitedHealthcare","MBR9012345","","","Dr. Robert","Williams","1234567890","CLM2009"
+"Jack","White","MRN001010","1992-01-08","2024-01-24","980.00","Cigna","MBR0123456","Humana","MBR4455667","Dr. Sarah","Johnson","2345678901","CLM2010"
