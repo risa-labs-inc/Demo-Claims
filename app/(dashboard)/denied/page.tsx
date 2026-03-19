@@ -1,5 +1,12 @@
 import { ClaimsTable } from '@/components/claims/ClaimsTable'
 
 export default function DeniedCasesPage() {
-  return <ClaimsTable title="My Denied Cases" filterByClaimStatus={['DENIED']} filterByAssignee="John Doe" />
+  return (
+    <ClaimsTable
+      title="My Denied Cases"
+      filterByClaimStatus={['DENIED']}
+      filterByAssignee="John Doe"
+      showDenialStage
+    />
+  )
 }

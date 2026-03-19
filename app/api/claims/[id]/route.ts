@@ -78,11 +78,19 @@ export async function PATCH(
     if (body.denialCodes !== undefined) {
       updateData.denialCodes = body.denialCodes || null
     }
+    if (body.denialDate !== undefined) {
+      updateData.denialDate = body.denialDate ? new Date(body.denialDate) : null
+    }
     if (body.deniedLineItems !== undefined) {
       updateData.deniedLineItems = body.deniedLineItems || null
     }
     if (body.denialDescription !== undefined) {
       updateData.denialDescription = body.denialDescription || null
+    }
+
+    // Handle denial stage
+    if (body.denialStage !== undefined) {
+      updateData.denialStage = body.denialStage || null
     }
 
     // Handle remarks

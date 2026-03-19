@@ -5,6 +5,7 @@ import { Copy, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from './StatusBadge'
 import { MarkCompleteModal } from './MarkCompleteModal'
+import { DenialManagementModal } from './DenialManagementModal'
 import { ClaimWithAssignee, Stage, ClaimStatus } from '@/lib/types'
 import { formatDate, formatCurrency } from '@/lib/utils'
 import { useToast } from '@/components/ui/use-toast'
@@ -269,7 +270,10 @@ export function ClaimDetailModal({ claim, onClose, onUpdate }: ClaimDetailModalP
   const [activeTab, setActiveTab] = useState<'primary' | 'secondary'>('primary')
   const [showMarkComplete, setShowMarkComplete] = useState(false)
   const [showAddClaimDetails, setShowAddClaimDetails] = useState(false)
+  const [showDenialManagement, setShowDenialManagement] = useState(false)
   const [templateCopied, setTemplateCopied] = useState(false)
+
+  const isDenied = claim.claimStatus === 'DENIED' || claim.claimStatus === 'PARTIALLY_PAID'
 
   // Determine if we have claim details for the current tab
   const hasClaimDetails = activeTab === 'primary'
@@ -288,6 +292,7 @@ export function ClaimDetailModal({ claim, onClose, onUpdate }: ClaimDetailModalP
         paidAmount: claim.paidAmount,
         paymentDate: claim.paymentDate,
         denialCodes: claim.denialCodes,
+        denialDate: claim.denialDate,
         deniedLineItems: claim.deniedLineItems,
         denialDescription: claim.denialDescription,
         plan: claim.primaryInsurance,
@@ -303,6 +308,7 @@ export function ClaimDetailModal({ claim, onClose, onUpdate }: ClaimDetailModalP
       paidAmount: claim.secondaryPaidAmount,
       paymentDate: claim.secondaryPaymentDate,
       denialCodes: claim.secondaryDenialCodes,
+      denialDate: null as Date | null,
       deniedLineItems: claim.secondaryDeniedLineItems,
       denialDescription: claim.secondaryDenialDescription,
       plan: claim.secondaryInsurance,
@@ -313,19 +319,37 @@ export function ClaimDetailModal({ claim, onClose, onUpdate }: ClaimDetailModalP
   const currentData = getClaimData()
 
   const generateTemplate = () => {
-    const status = currentData.claimStatus || 'Unknown'
-    const dos = formatDate(claim.dateOfService)
-    const plan = currentData.plan
-    const dcr = currentData.claimReceivedDate ? formatDate(currentData.claimReceivedDate) : ''
-    const cn = currentData.claimNumber || ''
-    const denialCodes = currentData.denialCodes || ''
-    const denialDesc = currentData.denialDescription || ''
-    const paidAmount = currentData.paidAmount ? `$${currentData.paidAmount}` : ''
-    const checkNumber = currentData.checkNumber || ''
-    const checkDate = currentData.checkDate ? formatDate(currentData.checkDate) : ''
-    const lineItems = currentData.deniedLineItems || ''
+    const parts: string[] = [
+      `(${currentData.claimStatus || 'UNKNOWN'}) RISA:`,
+      `DC: ${formatDate(claim.dateOfService)}`,
+      `PN: ${currentData.plan}`,
+    ]
 
-    return `(${status}) RISA:_ DC: ${dos}_ PN: ${plan}_ DCR: ${dcr}_ CN:${cn}_ DC/RM: ${denialCodes}_ DCD: ${denialDesc}_ PA: ${paidAmount}_ CKN:${checkNumber} _ CKD: ${checkDate}_ LI: ${lineItems}`
+    const dcr = currentData.claimReceivedDate ? formatDate(currentData.claimReceivedDate) : ''
+    if (dcr)                                      parts.push(`DCR: ${dcr}`)
+
+    const cn = currentData.claimNumber ?? ''
+    if (cn)                                       parts.push(`CN:${cn}`)
+
+    const dcrm = currentData.denialCodes ?? ''
+    if (dcrm)                                     parts.push(`DC/RM: ${dcrm}`)
+
+    const dcd = currentData.denialDescription ?? ''
+    if (dcd)                                      parts.push(`DCD: ${dcd}`)
+
+    const pa = currentData.paidAmount ? `$${currentData.paidAmount}` : ''
+    if (pa)                                       parts.push(`PA: ${pa}`)
+
+    const ckn = currentData.checkNumber ?? ''
+    if (ckn)                                      parts.push(`CKN:${ckn}`)
+
+    const ckd = currentData.checkDate ? formatDate(currentData.checkDate) : ''
+    if (ckd)                                      parts.push(`CKD: ${ckd}`)
+
+    const li = currentData.deniedLineItems ?? ''
+    if (li)                                       parts.push(`LI: ${li}`)
+
+    return parts.join(', ')
   }
 
   const copyTemplate = async () => {
@@ -602,10 +626,14 @@ export function ClaimDetailModal({ claim, onClose, onUpdate }: ClaimDetailModalP
                   <>
                     <div className="mb-6">
                       <h4 className="font-semibold text-gray-900 mb-4">Denial Details</h4>
-                      <div className="grid grid-cols-2 gap-6 mb-4">
+                      <div className="grid grid-cols-3 gap-6 mb-4">
                         <div>
                           <span className="text-xs text-gray-500 uppercase">Denial Code</span>
                           <p className="text-sm font-medium">{currentData.denialCodes || '-'}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 uppercase">Denial Date</span>
+                          <p className="text-sm font-medium">{currentData.denialDate ? formatDate(currentData.denialDate) : '-'}</p>
                         </div>
                         <div>
                           <span className="text-xs text-gray-500 uppercase">Denial Line Items</span>
@@ -663,12 +691,21 @@ export function ClaimDetailModal({ claim, onClose, onUpdate }: ClaimDetailModalP
           <Button variant="outline" onClick={onClose}>
             Go Back
           </Button>
-          <Button
-            className="bg-gray-900 hover:bg-gray-800 text-white"
-            onClick={() => setShowMarkComplete(true)}
-          >
-            Mark as Completed
-          </Button>
+          {isDenied ? (
+            <Button
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={() => setShowDenialManagement(true)}
+            >
+              Continue
+            </Button>
+          ) : (
+            <Button
+              className="bg-gray-900 hover:bg-gray-800 text-white"
+              onClick={() => setShowMarkComplete(true)}
+            >
+              Mark as Completed
+            </Button>
+          )}
         </div>
 
         {/* Mark Complete Modal */}
@@ -686,6 +723,20 @@ export function ClaimDetailModal({ claim, onClose, onUpdate }: ClaimDetailModalP
           onSave={handleSaveClaimDetails}
           isSecondary={activeTab === 'secondary'}
         />
+
+        {/* Denial Management Screen — full overlay for DENIED claims */}
+        {showDenialManagement && (
+          <div className="fixed inset-0 z-50 bg-white flex flex-col">
+            <DenialManagementModal
+              claim={claim}
+              onBack={() => setShowDenialManagement(false)}
+              onSave={() => {
+                setShowDenialManagement(false)
+                onUpdate()
+              }}
+            />
+          </div>
+        )}
       </div>
   )
 }

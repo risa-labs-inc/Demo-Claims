@@ -3,16 +3,38 @@ import { formatDate } from './utils'
 
 export function generateClaimTemplate(claim: ClaimWithAssignee): string {
   const status = claim.claimStatus || 'UNKNOWN'
-  const dateOfService = formatDate(claim.dateOfService)
-  const primaryInsurance = claim.primaryInsurance
-  const claimReceivedDate = claim.claimReceivedDate ? formatDate(claim.claimReceivedDate) : ''
-  const claimNumber = claim.claimNumber || ''
-  const denialCodes = claim.denialCodes || ''
-  const denialDescription = claim.denialDescription || ''
-  const paidAmount = claim.paidAmount !== null ? `$${claim.paidAmount}` : ''
-  const checkNumber = claim.checkNumber || ''
-  const checkDate = claim.checkDate ? formatDate(claim.checkDate) : ''
-  const deniedLineItems = claim.deniedLineItems || ''
 
-  return `(${status}) RISA:, DC: ${dateOfService}, PN: ${primaryInsurance}, DCR: ${claimReceivedDate}, CN:${claimNumber}, DCRM: ${denialCodes}, DCD: ${denialDescription}, PA: ${paidAmount}, CKN:${checkNumber}, CKD: ${checkDate}, LI: ${deniedLineItems}`
+  // Always-present fields
+  const parts: string[] = [
+    `(${status}) RISA:`,
+    `DC: ${formatDate(claim.dateOfService)}`,
+    `PN: ${claim.primaryInsurance}`,
+  ]
+
+  // Conditionally append only when a value exists
+  const dcr = claim.claimReceivedDate ? formatDate(claim.claimReceivedDate) : ''
+  if (dcr)                          parts.push(`DCR: ${dcr}`)
+
+  const cn = claim.claimNumber ?? ''
+  if (cn)                           parts.push(`CN:${cn}`)
+
+  const dcrm = claim.denialCodes ?? ''
+  if (dcrm)                         parts.push(`DC/RM: ${dcrm}`)
+
+  const dcd = claim.denialDescription ?? ''
+  if (dcd)                          parts.push(`DCD: ${dcd}`)
+
+  const pa = claim.paidAmount != null ? `$${claim.paidAmount}` : ''
+  if (pa)                           parts.push(`PA: ${pa}`)
+
+  const ckn = claim.checkNumber ?? ''
+  if (ckn)                          parts.push(`CKN:${ckn}`)
+
+  const ckd = claim.checkDate ? formatDate(claim.checkDate) : ''
+  if (ckd)                          parts.push(`CKD: ${ckd}`)
+
+  const li = claim.deniedLineItems ?? ''
+  if (li)                           parts.push(`LI: ${li}`)
+
+  return parts.join(', ')
 }

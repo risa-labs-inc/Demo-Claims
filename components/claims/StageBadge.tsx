@@ -16,7 +16,7 @@ const stageConfig: Record<Stage, { label: string; className: string }> = {
   },
   VALIDATED: {
     label: 'Validated',
-    className: 'bg-green-50 text-green-700 border-green-500',
+    className: 'bg-blue-50 text-blue-700 border-blue-300',
   },
   PROCESSED: {
     label: 'Processed',

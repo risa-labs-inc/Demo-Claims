@@ -57,8 +57,13 @@ model Claim {
 
   // Denial Details
   denialCodes       String?
+  denialDate        DateTime?
   deniedLineItems   String?
   denialDescription String?
+
+  // Denial workflow stage (independent of claim stage; only used for DENIED cases)
+  // Values: PENDING | REVIEWED | RESOLVED
+  denialStage String? @default("PENDING")
 
   // Remarks
   remarks String?

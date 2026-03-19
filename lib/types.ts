@@ -35,8 +35,10 @@ export interface ClaimWithAssignee {
   paidAmount: number | null
   paymentDate: Date | null
   denialCodes: string | null
+  denialDate: Date | null
   deniedLineItems: string | null
   denialDescription: string | null
+  denialStage: string | null
   remarks: string | null
   // Secondary Insurance Claim Details
   secondaryClaimNumber: string | null

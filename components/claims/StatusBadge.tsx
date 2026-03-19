@@ -12,7 +12,7 @@ const statusConfig: Record<ClaimStatus, { label: string; className: string }> = 
   },
   DENIED: {
     label: 'Denied',
-    className: 'bg-white text-gray-700 border-gray-300',
+    className: 'bg-red-50 text-red-700 border-red-300',
   },
   PARTIALLY_PAID: {
     label: 'Partially Paid',

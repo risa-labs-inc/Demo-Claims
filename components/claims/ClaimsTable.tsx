@@ -10,6 +10,7 @@ import { ClaimDetailModal } from './ClaimDetailModal'
 import { FilterModal, FilterState } from './FilterModal'
 import { ClaimWithAssignee, Stage } from '@/lib/types'
 import { formatDate, formatCurrency } from '@/lib/utils'
+import { generateClaimTemplate } from '@/lib/template'
 import { useToast } from '@/components/ui/use-toast'
 import {
   Select,
@@ -36,6 +37,7 @@ interface ClaimsTableProps {
   filterByStage?: Stage[]
   filterByClaimStatus?: string[]
   emptyState?: boolean
+  showDenialStage?: boolean
 }
 
 const emptyFilters: FilterState = {
@@ -48,12 +50,35 @@ const emptyFilters: FilterState = {
   assignedTo: [],
 }
 
+function DenialStageBadge({ stage }: { stage: string | null }) {
+  if (!stage || stage === 'PENDING') {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-500">
+        Pending
+      </span>
+    )
+  }
+  if (stage === 'REVIEWED') {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-yellow-100 text-yellow-700">
+        Reviewed
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700">
+      Resolved
+    </span>
+  )
+}
+
 export function ClaimsTable({
   title,
   filterByAssignee,
   filterByStage,
   filterByClaimStatus,
-  emptyState = false
+  emptyState = false,
+  showDenialStage = false,
 }: ClaimsTableProps) {
   const { toast } = useToast()
   const [claims, setClaims] = useState<ClaimWithAssignee[]>([])
@@ -232,6 +257,21 @@ export function ClaimsTable({
     }
   }
 
+  const handleStageChange = async (claimId: string, newStage: string) => {
+    try {
+      const response = await fetch(`/api/claims/${claimId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage: newStage }),
+      })
+      if (!response.ok) throw new Error('Failed to update stage')
+      toast({ title: 'Stage updated', variant: 'success' })
+      fetchClaims()
+    } catch {
+      toast({ title: 'Error', description: 'Failed to update stage', variant: 'destructive' })
+    }
+  }
+
   const handleApplyFilters = (newFilters: FilterState) => {
     setFilters(newFilters)
     setIsFilterModalOpen(false)
@@ -338,7 +378,7 @@ export function ClaimsTable({
                 Charge <ChevronDown className="inline h-2.5 w-2.5 ml-0.5" />
               </th>
               <th className="px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                Stage <ChevronDown className="inline h-2.5 w-2.5 ml-0.5" />
+                {showDenialStage ? 'Denial Stage' : 'Stage'} <ChevronDown className="inline h-2.5 w-2.5 ml-0.5" />
               </th>
               <th className="px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
                 Status <ChevronDown className="inline h-2.5 w-2.5 ml-0.5" />
@@ -392,7 +432,7 @@ export function ClaimsTable({
                   </td>
                   <td className="px-2 py-1.5">
                     <div className="text-gray-900 text-xs">
-                      Dr. {claim.providerFirstName} {claim.providerLastName}
+                      {claim.providerFirstName.replace(/^Dr\.\s*/i, 'Dr. ')}{claim.providerLastName}
                     </div>
                     <div className="text-[10px] text-gray-500">ID: {claim.providerNpi}</div>
                   </td>
@@ -409,8 +449,25 @@ export function ClaimsTable({
                   <td className="px-2 py-1.5 text-gray-900 whitespace-nowrap text-xs">
                     {formatCurrency(Number(claim.chargeAmount))}
                   </td>
-                  <td className="px-2 py-1.5">
-                    <StageBadge stage={claim.stage} />
+                  <td className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
+                    {!showDenialStage && (claim.stage === 'VALIDATED' || claim.stage === 'PROCESSED') ? (
+                      <Select
+                        value={claim.stage}
+                        onValueChange={(value) => handleStageChange(claim.id, value)}
+                      >
+                        <SelectTrigger className={`w-28 h-6 text-[10px] font-medium ${claim.stage === 'VALIDATED' ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-green-300 bg-green-50 text-green-700'}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="VALIDATED" className="text-xs">Validated</SelectItem>
+                          <SelectItem value="PROCESSED" className="text-xs">Processed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : showDenialStage ? (
+                      <DenialStageBadge stage={(claim as any).denialStage ?? null} />
+                    ) : (
+                      <StageBadge stage={claim.stage} />
+                    )}
                   </td>
                   <td className="px-2 py-1.5">
                     <StatusBadge status={claim.claimStatus} />
@@ -437,7 +494,7 @@ export function ClaimsTable({
                     {(claim.stage === 'PROCESSED' || claim.stage === 'VALIDATED') ? (
                       <button
                         className="p-1 hover:bg-gray-100 rounded"
-                        onClick={(e) => copyToClipboard(claim.claimId, e)}
+                        onClick={(e) => copyToClipboard(generateClaimTemplate(claim), e)}
                       >
                         <Copy className="h-3.5 w-3.5 text-gray-400" />
                       </button>

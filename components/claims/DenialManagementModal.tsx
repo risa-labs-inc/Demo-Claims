@@ -1,0 +1,1608 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { ChevronRight, ChevronDown } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { ClaimWithAssignee } from '@/lib/types'
+import { formatDate, formatCurrency } from '@/lib/utils'
+import { MockDocumentsTab } from './MockDocumentsTab'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface RuleResult {
+  rule_name: string
+  decision_question: string
+  status: 'PASSED' | 'FAILED' | 'WARNING' | 'MANUAL' | 'SKIPPED'
+  explanation: string
+  data_used: Record<string, unknown>
+}
+
+interface ActionPlan {
+  recommended_action: string
+  flags: Record<string, string>
+  documents_collected: string[]
+}
+
+interface ClaimCase {
+  patient_name: string
+  mrn: string
+  insurance_name: string
+  dob: string
+  plan: string
+  dos: string
+  billed_amount: number
+  claim_received_date: string
+  claim_number: string
+  denial_age_days: number
+  denial: {
+    denial_code: string
+    denial_remark_code: string
+    denial_reason: string
+    denial_type: string
+    diagnosis_codes: string[]
+  }
+  service_lines: Array<{
+    line_number: number
+    dos: string
+    cpt_code: string
+    modifiers: string[]
+    billed_amount: number
+    allowed_amount: number
+    paid_amount: number
+    remark_codes: string[]
+    carc_codes: string[]
+  }>
+}
+
+// ─── Status badge styles ───────────────────────────────────────────────────────
+
+const STATUS_STYLES: Record<string, string> = {
+  PASSED: 'bg-green-100 text-green-700',
+  FAILED: 'bg-red-100 text-red-700',
+  WARNING: 'bg-yellow-100 text-yellow-700',
+  MANUAL: 'bg-gray-100 text-gray-600',
+  SKIPPED: 'bg-gray-100 text-gray-400',
+}
+
+// ─── Rule row ─────────────────────────────────────────────────────────────────
+
+function RuleRow({ result }: { result: RuleResult }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="border-b border-gray-100 last:border-0">
+      <button
+        className="w-full flex items-center justify-between py-3.5 px-1 text-left hover:bg-gray-50"
+        onClick={() => setOpen(!open)}
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-gray-800">{result.rule_name}</span>
+          <span
+            className={`px-2 py-0.5 rounded text-xs font-semibold ${
+              STATUS_STYLES[result.status] ?? STATUS_STYLES.MANUAL
+            }`}
+          >
+            {result.status}
+          </span>
+        </div>
+        <span className="text-gray-400">
+          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </span>
+      </button>
+
+      {open && (
+        <div className="pb-3 px-1 space-y-2">
+          <p className="text-xs text-gray-500">
+            <span className="font-medium text-gray-600">Question: </span>
+            {result.decision_question}
+          </p>
+          <p className="text-xs text-gray-700">{result.explanation}</p>
+
+          {Object.keys(result.data_used ?? {}).length > 0 && (
+            <div className="bg-gray-50 rounded p-2 mt-1">
+              <div className="text-xs font-medium text-gray-500 mb-1">Data Used</div>
+              {Object.entries(result.data_used).map(([k, v]) => (
+                <div key={k} className="flex text-xs gap-2 py-0.5">
+                  <span className="text-gray-500 shrink-0 w-44">{k}:</span>
+                  <span className="text-gray-700 break-all">
+                    {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Cover Letter Modal ────────────────────────────────────────────────────────
+
+function CoverLetterModal({
+  claim,
+  denial,
+  actionPlan,
+  onClose,
+}: {
+  claim: ClaimWithAssignee
+  denial: { denial_code: string; denial_remark_code: string; denial_reason: string; denial_type: string; diagnosis_codes: string[] }
+  actionPlan: ActionPlan | null
+  onClose: () => void
+}) {
+  const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+  const dos = formatDate(claim.dateOfService)
+  const code = denial.denial_code
+
+  // For CO-22, the appeal is sent to the secondary payer (who denied); otherwise use primary
+  const appealPayer = code === 'CO-22'
+    ? (claim.secondaryInsurance ?? claim.primaryInsurance)
+    : claim.primaryInsurance
+
+  const payerAddress = (() => {
+    const ins = appealPayer?.toLowerCase() ?? ''
+    if (ins.includes('united')) return 'United Healthcare\nAppeals Department\nP.O. Box 30432\nSalt Lake City, UT 84130'
+    if (ins.includes('cigna')) return 'Cigna Healthcare\nAppeals & Grievance Department\nP.O. Box 188004\nChattanooga, TN 37422'
+    if (ins.includes('aetna')) return 'Aetna\nMedical Appeals Unit\nP.O. Box 14463\nLexington, KY 40512'
+    if (ins.includes('medicare')) return 'Medicare Administrative Contractor\nAppeals Department\nP.O. Box 6703\nIndianapolis, IN 46206'
+    if (ins.includes('blue cross') || ins.includes('bcbs')) return 'Blue Cross Blue Shield\nAppeals Department\nP.O. Box 2924\nFargo, ND 58108'
+    return `${appealPayer}\nAppeals Department`
+  })()
+
+  const subject = (() => {
+    if (code === 'CO-27') return `Appeal of Claim Denial – Coverage Termination (CO-27)\nPatient: ${claim.patientFirstName} ${claim.patientLastName} | Claim #: ${claim.claimNumber ?? claim.claimId} | DOS: ${dos}`
+    if (code === 'CO-28') return `Appeal of Claim Denial – Coverage Not in Effect (CO-28)\nPatient: ${claim.patientFirstName} ${claim.patientLastName} | Claim #: ${claim.claimNumber ?? claim.claimId} | DOS: ${dos}`
+    if (code === 'CO-97') return `Appeal of Partial Denial – Bundling / NCCI Edit (CO-97)\nPatient: ${claim.patientFirstName} ${claim.patientLastName} | Claim #: ${claim.claimNumber ?? claim.claimId} | DOS: ${dos}`
+    if (code === 'CO-50') return `Appeal of Partial Denial – Medical Necessity (CO-50)\nPatient: ${claim.patientFirstName} ${claim.patientLastName} | Claim #: ${claim.claimNumber ?? claim.claimId} | DOS: ${dos}`
+    {
+      const appealClaimNum = claim.secondaryClaimNumber ?? (claim.claimNumber ?? claim.claimId)
+      return `Appeal of Secondary Claim Denial – Missing Primary EOB (CO-22)\nPatient: ${claim.patientFirstName} ${claim.patientLastName} | Secondary Claim #: ${appealClaimNum} | DOS: ${dos}`
+    }
+  })()
+
+  const body = (() => {
+    const name = `${claim.patientFirstName} ${claim.patientLastName}`
+    const memberId = claim.primaryMemberId
+    const provider = `${claim.providerFirstName} ${claim.providerLastName}`
+    const npi = claim.providerNpi
+    const claimNum = claim.claimNumber ?? claim.claimId
+    const charge = formatCurrency(Number(claim.chargeAmount))
+
+    if (code === 'CO-27') return `
+Dear Appeals Department,
+
+We are writing to formally appeal the denial of the above-referenced claim for patient ${name} (Member ID: ${memberId}, MRN: ${claim.mrn}). Services were rendered on ${dos} by ${provider} (NPI: ${npi}). The claim (Claim #: ${claimNum}, Billed Amount: ${charge}) was denied under CARC code CO-27, citing expenses incurred after coverage termination.
+
+We respectfully contest this determination on the following grounds:
+
+1. Retroactive Eligibility: The patient re-enrolled in ${claim.primaryInsurance} effective January 1, 2026. We respectfully request that your enrollment department confirm whether a retroactive reinstatement has been processed, which would bring the date of service within the coverage period.
+
+2. Grace Period Provision: The date of service falls within six (6) days of the policy termination date (December 31, 2025). Per the terms of the subscriber agreement, a thirty (30)-day grace period applies to claims incurred immediately following a policy termination when the member has re-enrolled. The services rendered on ${dos} fall within this window.
+
+3. Medical Necessity: The services billed (${claim.deniedLineItems ?? 'as itemized on the attached claim'}) were medically necessary and consistent with the patient's ongoing treatment plan. Denial of these services would create an interruption in a clinically active care protocol.
+
+We are enclosing the following supporting documentation:
+  • Copy of original claim and Explanation of Benefits (EOB)
+  • Proof of re-enrollment effective January 1, 2026
+  • Premium payment confirmation for December 2025
+  • Clinical notes evidencing medical necessity
+
+We respectfully request that this claim be reconsidered and approved for payment at the contracted rate. Please respond within the timeframe required by applicable state and federal regulations. If additional information is needed, contact our billing department at the address below.`
+
+    if (code === 'CO-28') return `
+Dear Appeals Department,
+
+We are writing regarding the denial of the claim for patient ${name} (Member ID: ${memberId}, MRN: ${claim.mrn}). The claim (Claim #: ${claimNum}, DOS: ${dos}, Billed Amount: ${charge}) was denied under CARC code CO-28, indicating that coverage was not in effect at the time of service. We believe this denial may be the result of an enrollment discrepancy and respectfully request a formal review.
+
+Basis for Appeal:
+
+1. Enrollment Discrepancy: Our records indicate that the patient was insured under ${claim.primaryInsurance} at the time of service. We request that your eligibility department verify whether a plan change during the November–December open enrollment period caused the member ID on file (${memberId}) to be superseded by a new subscriber ID. If so, please advise us of the correct member information so we may resubmit accordingly.
+
+2. Continuity of Care: ${name} is an established patient currently undergoing active treatment. The services rendered on ${dos} (${claim.deniedLineItems ?? 'as itemized'}) constitute a continuation of an existing care plan. Any disruption in coverage processing creates risk to the patient's clinical outcomes.
+
+3. Good Faith Billing: This claim was submitted in good faith based on the insurance information provided by the patient at the time of service. We request that the payer apply the coordination of benefits rules applicable to enrollment discrepancies and adjudicate this claim accordingly.
+
+Enclosed documentation:
+  • Original claim submission
+  • Patient's insurance card presented at time of service
+  • Eligibility verification response from date of service
+  • Clinical notes confirming active treatment plan
+
+We ask that this claim be reviewed and adjudicated based on the patient's actual coverage status. Please contact our office if additional clarification is required.`
+
+    if (code === 'CO-97') {
+      const paidCpts97 = (claim.remarks ?? '').match(/Paid CPTs?:\s*([^.\n]+)/)?.[1] ?? '96413, 96415, J9355'
+      const paidAmt97 = Number(claim.paidAmount) > 0 ? formatCurrency(Number(claim.paidAmount)) : 'as noted on EOB'
+      const ins97 = claim.primaryInsurance
+      return `
+Dear Appeals Department,
+
+We are writing to appeal the partial denial of the above-referenced claim for patient ${name} (Member ID: ${memberId}, MRN: ${claim.mrn}). Services were rendered on ${dos} by ${provider} (NPI: ${npi}). The claim (Claim #: ${claimNum}, Billed Amount: ${charge}) was partially adjudicated: ${ins97} paid ${paidAmt97} for CPT codes ${paidCpts97}, but denied CPT ${claim.deniedLineItems ?? ''} under CARC code CO-97 (bundling).
+
+Basis for Appeal:
+
+1. Modifier 25 — Separately Identifiable E&M: CPT ${claim.deniedLineItems ?? ''} represents a significant, separately identifiable evaluation and management service rendered on ${dos} that addressed clinical concerns distinct from the infusion administration. Per CMS and NCCI guidelines, modifier 25 allows separate reimbursement of an E&M service on the same day as a procedure when the E&M is documented as distinct. We are resubmitting CPT ${claim.deniedLineItems ?? ''} with modifier 25 appended.
+
+2. NCCI Modifier Indicator: The NCCI edit applicable to this CPT pair carries a modifier indicator of "1," confirming that the bundling edit is bypassable with the appropriate modifier. CO-97 denials for this CPT pair are therefore correctable upon proper resubmission.
+
+3. Clinical Documentation: The progress note for ${dos} confirms that the treating physician conducted a separately identifiable evaluation — including review of labs, assessment of treatment response, and modification of the care plan — independent of infusion administration. A copy is enclosed.
+
+We respectfully request that ${ins97} reprocess CPT ${claim.deniedLineItems ?? ''}-25 as a separately reimbursable service. Enclosed documentation:
+  • Corrected claim with modifier 25 on CPT ${claim.deniedLineItems ?? ''}
+  • Progress note for ${dos} (supporting separate E&M documentation)
+  • NCCI edit reference confirming modifier bypass eligibility`
+    }
+
+    if (code === 'CO-50') {
+      const paidCpts50 = (claim.remarks ?? '').match(/Paid CPTs?:\s*([^.\n]+)/)?.[1] ?? '99215, 96413'
+      const paidAmt50 = Number(claim.paidAmount) > 0 ? formatCurrency(Number(claim.paidAmount)) : 'as noted on EOB'
+      const deniedCpts50 = claim.deniedLineItems ?? '96415, 96417, J9355'
+      const ins50 = claim.primaryInsurance
+      return `
+Dear Appeals Department,
+
+We are writing to appeal the partial denial of the above-referenced claim for patient ${name} (Member ID: ${memberId}, MRN: ${claim.mrn}). Services were rendered on ${dos} by ${provider} (NPI: ${npi}). The claim (Claim #: ${claimNum}, Billed Amount: ${charge}) was partially adjudicated: ${ins50} paid ${paidAmt50} for ${paidCpts50}, but denied ${deniedCpts50} under CARC code CO-50, citing lack of medical necessity.
+
+Basis for Appeal:
+
+1. Medical Necessity Established: ${name} is an established oncology patient currently undergoing an active treatment protocol. The services rendered on ${dos} (${deniedCpts50}) were ordered and administered under the direct supervision of ${provider} as a clinically necessary component of the patient's ongoing treatment plan. The extended infusion duration and drug selection were directly responsive to the patient's diagnosis and treatment response data documented in the enclosed clinical notes.
+
+2. Clinical Documentation: The treating physician's progress note for ${dos}, along with the oncology treatment protocol on file, confirms the medical necessity of ${deniedCpts50}. The clinical decision to extend the infusion duration was based on the patient's active oncological diagnosis and is consistent with accepted oncology treatment guidelines (NCCN/ASCO).
+
+3. Prior Authorization / Retrospective Review: We respectfully request that ${ins50}'s Utilization Management department conduct a retrospective medical necessity review for ${deniedCpts50}. If a retrospective authorization is available, we request approval so this claim may be resubmitted. If not, we request a formal clinical appeal review.
+
+We believe the denied services meet ${ins50}'s medical necessity criteria and respectfully request reconsideration. Enclosed:
+  • Original EOB with CO-50 denial
+  • Physician order for ${dos}
+  • Oncology treatment protocol / care plan
+  • Progress note documenting clinical decision-making
+  • Applicable diagnosis-to-drug LCD reference`
+    }
+
+    // CO-22 — appeal to secondary (commercial) payer: Medicare paid, EOB not attached
+    {
+      const isMedicarePrimary = claim.primaryInsurance?.toLowerCase().includes('medicare')
+      const commercialPayerCL = isMedicarePrimary ? (claim.secondaryInsurance ?? claim.primaryInsurance) : claim.primaryInsurance
+      const commercialMemberIdCL = isMedicarePrimary ? (claim.secondaryMemberId ?? memberId) : memberId
+      const medicareMemberIdCL = isMedicarePrimary ? claim.primaryMemberId : (claim.secondaryMemberId ?? 'on file')
+      const deniedItemsCL = claim.secondaryDeniedLineItems ?? claim.deniedLineItems ?? 'as itemized on the claim'
+      const medicarePaidCL = Number(claim.paidAmount) > 0 ? formatCurrency(Number(claim.paidAmount)) : 'as noted on the enclosed EOMB'
+      const medicareEFTCL = claim.checkNumber ?? 'see enclosed EOMB'
+      const medicarePaidDateCL = claim.checkDate ? formatDate(claim.checkDate) : 'see enclosed EOMB'
+      const secondaryClaimNumCL = claim.secondaryClaimNumber ?? claimNum
+      const remainingCL = Number(claim.paidAmount) > 0
+        ? formatCurrency(Math.round((Number(claim.chargeAmount) - Number(claim.paidAmount)) * 100) / 100)
+        : 'as shown on the enclosed EOMB'
+
+      return `
+Dear Appeals Department,
+
+We are writing to appeal the denial of secondary claim #${secondaryClaimNumCL} for patient ${name} (Member ID: ${commercialMemberIdCL}, MRN: ${claim.mrn}). The claim (DOS: ${dos}, Billed Amount: ${charge}) was submitted to ${commercialPayerCL} as secondary payer following Medicare adjudication and was denied under CARC code CO-22 / RARC N104, indicating that the primary payer Explanation of Benefits was not included with the submission.
+
+We acknowledge this documentation oversight and are resubmitting with the required supporting materials as detailed below.
+
+Basis for Appeal:
+
+1. Medicare Has Already Adjudicated and Paid as Primary Payer: Medicare (Member ID: ${medicareMemberIdCL}) processed this claim as the correct primary payer under CMS Medicare Secondary Payer (MSP) rules and issued payment of ${medicarePaidCL} via EFT (EFT #${medicareEFTCL}, dated ${medicarePaidDateCL}). A copy of the Medicare EOMB is enclosed with this appeal.
+
+2. Secondary Claim Submitted Without Primary EOMB: The original secondary claim submitted to ${commercialPayerCL} on ${medicarePaidDateCL} did not include the Medicare EOMB as required for COB processing. This documentation omission — not a coverage or eligibility issue — caused the CO-22 denial. The patient's coverage under ${commercialPayerCL} (Member ID: ${commercialMemberIdCL}) was and remains active.
+
+3. Request for Secondary Adjudication: We respectfully request that ${commercialPayerCL} process this claim as a COB crossover claim, applying the secondary benefit to the remaining patient responsibility of ${remainingCL} following Medicare's payment of ${medicarePaidCL}. The services rendered (${deniedItemsCL}) are covered under the ${commercialPayerCL} plan per the COB coordination agreement.
+
+Enclosed documentation:
+  • Medicare EOMB (EFT #${medicareEFTCL}, payment date ${medicarePaidDateCL})
+  • Original secondary claim and denial EOB (CO-22 / N104)
+  • Medicare eligibility verification
+  • MSP Questionnaire confirming Medicare as primary payer
+
+Please reprocess this claim as a secondary COB claim upon receipt of the enclosed Medicare EOMB. We appreciate your prompt attention to this matter.`
+    }
+  })()
+
+  const handleDownload = () => {
+    const printContent = document.getElementById('cover-letter-print-area')
+    if (!printContent) return
+    const win = window.open('', '_blank', 'width=850,height=1100')
+    if (!win) return
+    win.document.write(`<!DOCTYPE html><html><head>
+      <title>Cover Letter – ${claim.patientFirstName} ${claim.patientLastName}</title>
+      <style>
+        body { font-family: 'Times New Roman', serif; font-size: 12pt; color: #111; margin: 0; padding: 40px 60px; line-height: 1.6; }
+        h1 { font-size: 14pt; margin-bottom: 2px; }
+        .subtitle { font-size: 10pt; color: #555; margin-bottom: 20px; }
+        pre { font-family: inherit; white-space: pre-wrap; font-size: 11pt; }
+        .letterhead { border-bottom: 2px solid #1a1a2e; padding-bottom: 12px; margin-bottom: 24px; }
+        .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 10pt; margin-bottom: 20px; background: #f8f8f8; padding: 12px; border-radius: 4px; }
+        .meta-grid div span { font-weight: bold; display: block; font-size: 9pt; color: #555; text-transform: uppercase; letter-spacing: 0.05em; }
+        .no-print { display: none !important; }
+        @media print { body { padding: 20px 40px; } .no-print { display: none !important; } }
+      </style>
+    </head><body>
+      ${printContent.innerHTML}
+      <script>window.onload = function(){ window.print(); }<\/script>
+    </body></html>`)
+    win.document.close()
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col">
+        {/* Modal header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <div className="flex items-center gap-2">
+            <svg className="h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <h3 className="font-semibold text-gray-900">Cover Letter</h3>
+            <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
+              {claim.patientFirstName} {claim.patientLastName}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownload}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-gray-900 text-white rounded hover:bg-gray-700"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Download PDF
+            </button>
+            <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 rounded">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Letter content */}
+        <div className="flex-1 overflow-y-auto p-8 bg-gray-50">
+          <div
+            id="cover-letter-print-area"
+            className="bg-white shadow-sm rounded-lg p-10 max-w-2xl mx-auto font-serif text-sm text-gray-900 leading-relaxed"
+            style={{ fontFamily: "'Times New Roman', serif" }}
+          >
+            {/* Letterhead */}
+            <div className="border-b-2 border-gray-900 pb-4 mb-6">
+              <div className="text-base font-bold tracking-wide">RISA ONCOLOGY BILLING SERVICES</div>
+              <div className="text-xs text-gray-500 mt-0.5">123 Medical Plaza, Suite 400 · San Francisco, CA 94107 · Tel: (415) 555-0100 · Fax: (415) 555-0199</div>
+            </div>
+
+            {/* Date & Payer */}
+            <div className="mb-6 text-sm">
+              <p>{today}</p>
+              <div className="mt-4 whitespace-pre-line">{payerAddress}</div>
+            </div>
+
+            {/* RE: line */}
+            <div className="mb-6 text-sm">
+              <p className="font-bold">RE: {subject.split('\n').map((l, i) => (
+                <span key={i}>{l}{i === 0 ? <br /> : null}</span>
+              ))}</p>
+            </div>
+
+            {/* Salutation + body */}
+            <div className="text-sm whitespace-pre-line">{body.trim()}</div>
+
+            {/* Closing */}
+            <div className="mt-8 text-sm">
+              <p>Sincerely,</p>
+              <div className="mt-6 mb-1 border-b border-gray-400 w-48" />
+              <p className="font-semibold">{claim.providerFirstName} {claim.providerLastName}</p>
+              <p className="text-xs text-gray-500">Attending Physician | NPI: {claim.providerNpi}</p>
+              <p className="text-xs text-gray-500 mt-1">RISA Oncology Billing Services</p>
+            </div>
+
+            {/* Footer note */}
+            <div className="mt-8 pt-4 border-t border-gray-200 text-xs text-gray-400">
+              This letter was generated on {today} for appeal/resubmission purposes. Denial code: {denial.denial_code}{denial.denial_remark_code ? ` / ${denial.denial_remark_code}` : ''}.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Automated Analysis panel ─────────────────────────────────────────────────
+
+function AutomatedAnalysis({
+  ruleResults,
+  actionPlan,
+  loading,
+  onViewCoverLetter,
+}: {
+  ruleResults: RuleResult[] | null
+  actionPlan: ActionPlan | null
+  loading: boolean
+  onViewCoverLetter: () => void
+}) {
+  const [activeTab, setActiveTab] = useState(0)
+
+  const totalCount = ruleResults?.length ?? 0
+  const checkedCount = ruleResults?.filter((r) => r.status !== 'SKIPPED').length ?? 0
+  const passedCount = ruleResults?.filter((r) => r.status === 'PASSED').length ?? 0
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-1">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold text-gray-900">Automated Analysis</h2>
+            {loading && (
+              <span className="px-2 py-0.5 bg-blue-100 text-blue-600 text-xs font-medium rounded animate-pulse">
+                Running…
+              </span>
+            )}
+            {!loading && totalCount > 0 && (
+              <>
+                <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs font-medium rounded">
+                  {checkedCount}/{totalCount} checked
+                </span>
+                <span className="px-2 py-0.5 bg-green-600 text-white text-xs font-medium rounded">
+                  {passedCount} passed
+                </span>
+              </>
+            )}
+          </div>
+          <p className="text-xs text-gray-400 mt-0.5">Step-by-step validation results</p>
+        </div>
+        <button
+          onClick={onViewCoverLetter}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-gray-300 rounded hover:bg-gray-50 text-gray-700"
+        >
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          View Cover Letter
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-gray-200 mb-4">
+        {['Rule Engine Verification', 'Recommended Action Plan'].map((tab, i) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(i)}
+            className={`pb-2 px-1 mr-6 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === i
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      {loading && !ruleResults ? (
+        <div className="flex-1 flex flex-col gap-3 pt-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-10 bg-gray-100 rounded animate-pulse" />
+          ))}
+        </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto">
+          {activeTab === 0 && (
+            <div className="divide-y divide-gray-100">
+              {(ruleResults ?? []).map((r, i) => (
+                <RuleRow key={i} result={r} />
+              ))}
+            </div>
+          )}
+          {activeTab === 1 && actionPlan && (
+            <div className="space-y-4">
+              <div className="bg-green-50 border border-green-100 rounded-lg p-4">
+                <div className="text-sm font-semibold text-gray-800 mb-2">Recommended Action</div>
+                <p className="text-sm text-gray-700 mb-3">{actionPlan.recommended_action}</p>
+                <ul className="space-y-1">
+                  {Object.entries(actionPlan.flags ?? {}).map(([key, val]) => (
+                    <li key={key} className="flex items-center gap-2 text-sm">
+                      <span className="w-1.5 h-1.5 rounded-full bg-gray-500 shrink-0" />
+                      <span>
+                        <span className="font-medium text-gray-800">{key}</span>
+                        {' = '}
+                        <span className="text-gray-700">{val}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {(actionPlan.documents_collected?.length ?? 0) > 0 && (
+                <div>
+                  <div className="text-sm font-semibold text-gray-700 mb-2">Documents Collected:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {actionPlan.documents_collected.map((doc) => (
+                      <button
+                        key={doc}
+                        className="px-3 py-1.5 text-sm border border-gray-200 rounded hover:bg-gray-50"
+                      >
+                        {doc}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
+          {activeTab === 1 && !actionPlan && !loading && (
+            <p className="text-sm text-gray-400 pt-4">No action plan available.</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Denial Summary ───────────────────────────────────────────────────────────
+
+function DenialSummary({ denial }: { denial: ClaimCase['denial'] }) {
+  return (
+    <div className="border border-gray-200 rounded-lg p-4 mb-4">
+      <div className="flex items-center gap-3 mb-3">
+        <span className="text-sm font-semibold text-gray-800">Denial Summary</span>
+        {denial.denial_type && (
+          <span className="px-2 py-0.5 text-xs font-medium bg-orange-100 text-orange-700 rounded">
+            {denial.denial_type}
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-[auto_1fr_auto] gap-x-4 gap-y-1 text-xs text-gray-500">
+        <div>Denial Code</div>
+        <div>Denial Reason</div>
+        <div>Diagnosis Codes (Dx)</div>
+
+        <div className="flex items-center gap-1.5 mt-1">
+          {denial.denial_code && (
+            <span className="px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-xs font-bold">
+              {denial.denial_code}
+            </span>
+          )}
+          {denial.denial_remark_code && (
+            <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-xs font-bold">
+              {denial.denial_remark_code}
+            </span>
+          )}
+          {!denial.denial_code && !denial.denial_remark_code && (
+            <span className="text-gray-400">—</span>
+          )}
+        </div>
+
+        <div className="text-xs text-gray-700 mt-1 font-medium uppercase">
+          {denial.denial_reason || '—'}
+        </div>
+
+        <div className="flex flex-wrap gap-1.5 mt-1">
+          {denial.diagnosis_codes?.map((dx) => (
+            <span key={dx} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-medium">
+              {dx}
+            </span>
+          ))}
+          {(!denial.diagnosis_codes || denial.diagnosis_codes.length === 0) && (
+            <span className="text-gray-400">—</span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Service Lines Table ───────────────────────────────────────────────────────
+
+interface ServiceLine {
+  dos: string
+  cpt_code: string
+  modifiers: string[]
+  billed_amount: number
+  allowed_amount: number
+  paid_amount: number
+  primary_paid_amount: number
+  tmr: number
+  copay: number
+  deductible: number
+  coinsurance: number
+  remark_codes: { code: string; description: string }[]
+  carc_codes: { code: string; description: string }[]
+}
+
+function LineRow({ line }: { line: ServiceLine }) {
+  const [open, setOpen] = useState(false)
+
+  const fmt = (n: number) => `$${n.toFixed(2)}`
+
+  return (
+    <>
+      <tr
+        className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+        onClick={() => setOpen(!open)}
+      >
+        <td className="py-3 px-3 text-gray-400">
+          {open
+            ? <ChevronDown className="h-3.5 w-3.5" />
+            : <ChevronRight className="h-3.5 w-3.5" />}
+        </td>
+        <td className="py-3 px-2 text-xs text-gray-700">{line.dos}</td>
+        <td className="py-3 px-2 text-xs font-medium text-gray-900">{line.cpt_code}</td>
+        <td className="py-3 px-2 text-xs text-gray-600">
+          {line.modifiers?.length ? line.modifiers.join(', ') : '-'}
+        </td>
+        <td className="py-3 px-2 text-xs text-gray-700">{fmt(line.billed_amount)}</td>
+        <td className="py-3 px-2 text-xs text-gray-700">{fmt(line.allowed_amount)}</td>
+        <td className="py-3 px-2 text-xs text-gray-700">{fmt(line.paid_amount)}</td>
+      </tr>
+
+      {open && (
+        <tr className="bg-gray-50 border-b border-gray-200">
+          <td colSpan={7} className="px-8 py-4">
+            {/* Financial breakdown */}
+            <div className="grid grid-cols-6 gap-4 text-xs mb-4 border-b border-gray-200 pb-4">
+              {([
+                ['Primary Paid Amount', fmt(line.primary_paid_amount)],
+                ['Allowed Amount',      fmt(line.allowed_amount)],
+                ['TMR',                 fmt(line.tmr)],
+                ['Copay',               fmt(line.copay)],
+                ['Deductible',          fmt(line.deductible)],
+                ['Coinsurance',         fmt(line.coinsurance)],
+              ] as [string, string][]).map(([label, val]) => (
+                <div key={label}>
+                  <div className="text-gray-500 mb-0.5">{label}</div>
+                  <div className="font-medium text-gray-800">{val}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Remark codes */}
+            {line.remark_codes?.length > 0 && (
+              <div className="mb-3">
+                <div className="text-xs font-bold text-gray-700 uppercase mb-1">Remark Codes</div>
+                {line.remark_codes.map((rc, i) => (
+                  <p key={i} className="text-xs text-gray-600 mb-0.5">
+                    <span className="font-semibold">{rc.code}:</span> {rc.description}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {/* CARC codes */}
+            {line.carc_codes?.length > 0 && (
+              <div>
+                <div className="text-xs font-bold text-gray-700 uppercase mb-1">
+                  Claim Adjustment Reason Codes
+                </div>
+                {line.carc_codes.map((c, i) => (
+                  <p key={i} className="text-xs text-gray-600 mb-0.5">
+                    <span className="font-semibold">{c.code}:</span> {c.description}
+                  </p>
+                ))}
+              </div>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+function ServiceLinesTable({ lines }: { lines: ServiceLine[] }) {
+  if (!lines || lines.length === 0) {
+    return <p className="text-sm text-gray-400">No service lines available.</p>
+  }
+
+  return (
+    <div className="overflow-x-auto rounded border border-gray-200">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-gray-200 bg-white">
+            <th className="w-8" />
+            {['DOS', 'CPT Code', 'Modifiers', 'Billed amount', 'Allowed amount', 'Paid amount'].map((h) => (
+              <th key={h} className="py-2.5 px-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">
+                {h} <span className="text-gray-300">⇅</span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((line, i) => <LineRow key={i} line={line} />)}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+interface DenialManagementModalProps {
+  claim: ClaimWithAssignee
+  onBack: () => void
+  onSave: () => void
+}
+
+type DenialStage = 'REVIEWED' | 'RESOLVED'
+
+export function DenialManagementModal({ claim, onBack, onSave }: DenialManagementModalProps) {
+  const [activeTab, setActiveTab] = useState<'primary' | 'secondary'>('primary')
+  const [contentTab, setContentTab] = useState<'service-lines' | 'documents'>('service-lines')
+
+  const [ruleResults, setRuleResults] = useState<RuleResult[] | null>(null)
+  const [actionPlan, setActionPlan] = useState<ActionPlan | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState<DenialStage | null>(null)
+  const [currentDenialStage, setCurrentDenialStage] = useState<string | null>(claim.denialStage ?? null)
+  const [showCoverLetter, setShowCoverLetter] = useState(false)
+
+  const currentPlan = activeTab === 'primary' ? claim.primaryInsurance : claim.secondaryInsurance
+
+  // Derive denial info — prefer the active tab's denial fields
+  const denialCode = (activeTab === 'primary'
+    ? claim.denialCodes
+    : (claim.secondaryDenialCodes ?? claim.denialCodes)) ?? ''
+  const denialDescription = (activeTab === 'primary'
+    ? claim.denialDescription
+    : (claim.secondaryDenialDescription ?? claim.denialDescription)) ?? ''
+
+  const denial = {
+    denial_code: denialCode.split(',')[0]?.trim() ?? '',
+    denial_remark_code: denialCode.split(',')[1]?.trim() ?? '',
+    denial_reason: denialDescription || 'Patient ineligible for service',
+    denial_type: (() => {
+      const c = denialCode.split(',')[0]?.trim() ?? ''
+      if (c === 'CO-97') return 'Billing / Bundling Denial'
+      if (c === 'CO-50') return 'Medical Necessity Denial'
+      return 'Eligibility Denial'
+    })(),
+    diagnosis_codes: ['C0882', 'M1000', 'Z7989'],
+  }
+
+  const claimNumber = activeTab === 'primary'
+    ? (claim.claimNumber ?? claim.claimId ?? '')
+    : (claim.secondaryClaimNumber ?? claim.claimId ?? '')
+  const claimReceivedDate = activeTab === 'primary'
+    ? (claim.claimReceivedDate ? formatDate(claim.claimReceivedDate) : '')
+    : (claim.secondaryClaimReceivedDate ? formatDate(claim.secondaryClaimReceivedDate) : '')
+  const billedAmount = Number(claim.chargeAmount) ?? 0
+  const denialAge = (() => {
+    const base = activeTab === 'primary' ? claim.claimReceivedDate : (claim.secondaryClaimReceivedDate ?? claim.claimReceivedDate)
+    return base ? Math.floor((Date.now() - new Date(base).getTime()) / 86400000) : 14
+  })()
+  const primaryPaidAmount = Number(claim.paidAmount) || 0
+
+  // Remark + CARC codes per denial type
+  const { remarkCode, carcCode } = (() => {
+    const code = denial.denial_code
+    if (code === 'CO-27') return {
+      remarkCode: { code: 'S1', description: 'Benefits for this service are denied. The service was provided after the member\'s coverage ended.' },
+      carcCode:   { code: '27', description: 'Expenses incurred after coverage terminated.' },
+    }
+    if (code === 'CO-28') return {
+      remarkCode: { code: 'N30', description: 'Patient ineligible for this service on the date of service. Member ID not found as active subscriber.' },
+      carcCode:   { code: '28', description: 'Coverage not in effect at the time the service was provided.' },
+    }
+    if (code === 'CO-97') return {
+      remarkCode: { code: 'B15', description: 'This procedure code is included in the allowance for another service/procedure that has already been adjudicated. Modifier 25 required for separate E&M reimbursement on same day as procedure.' },
+      carcCode:   { code: '97', description: 'The benefit for this service is included in the payment/allowance for another service/procedure that has already been adjudicated.' },
+    }
+    if (code === 'CO-50') return {
+      remarkCode: { code: 'M115', description: 'This item or service has been denied as not reasonable and necessary. Pre-authorization was not obtained for the additional infusion hours and drug administered.' },
+      carcCode:   { code: '50', description: 'These are non-covered services because this is not deemed a medical necessity by the payer.' },
+    }
+    // CO-22 default
+    return {
+      remarkCode: { code: 'N104', description: 'This care may be covered by another payer per coordination of benefits. Resubmit with primary payer EOB.' },
+      carcCode:   { code: '22',  description: 'This care may be covered by another payer per coordination of benefits.' },
+    }
+  })()
+
+  const totalCharge = Number(claim.chargeAmount) || 600
+  const deniedCptList = ((activeTab === 'primary'
+    ? claim.deniedLineItems
+    : (claim.secondaryDeniedLineItems ?? claim.deniedLineItems)) ?? '99215, 96413')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  // For partially paid claims, parse the paid CPTs from remarks
+  const isPartiallyPaid = claim.claimStatus === 'PARTIALLY_PAID'
+  const paidCptMatch = isPartiallyPaid ? (claim.remarks ?? '').match(/Paid CPTs?:\s*([^.\n]+)/) : null
+  const paidCptList = paidCptMatch ? paidCptMatch[1].split(',').map((s) => s.trim()).filter(Boolean) : []
+
+  // Full list: paid CPTs first, then denied CPTs
+  const cptList = isPartiallyPaid && paidCptList.length > 0
+    ? [...paidCptList, ...deniedCptList]
+    : deniedCptList
+
+  // Spread charge evenly; first line gets the remainder so total is exact
+  const perLine = Math.floor((totalCharge / cptList.length) * 100) / 100
+  const isCO22WithPayment = denial.denial_code === 'CO-22' && primaryPaidAmount > 0
+  const mockServiceLines: ServiceLine[] = cptList.map((cpt, i) => {
+    const billed = i === cptList.length - 1
+      ? Math.round((totalCharge - perLine * (cptList.length - 1)) * 100) / 100
+      : perLine
+
+    // Paid CPT lines for partially paid claims — show actual payment, no denial codes
+    if (isPartiallyPaid && paidCptList.includes(cpt)) {
+      const perPaidCpt = Math.round((primaryPaidAmount / paidCptList.length) * 100) / 100
+      const allowed = Math.round(billed * 0.85 * 100) / 100
+      const coinsurance = Math.round((allowed - perPaidCpt) * 100) / 100
+      return {
+        dos: formatDate(claim.dateOfService),
+        cpt_code: cpt,
+        modifiers: [],
+        billed_amount: billed,
+        allowed_amount: allowed,
+        paid_amount: perPaidCpt,
+        primary_paid_amount: perPaidCpt,
+        tmr: 0.00,
+        copay: 0.00,
+        deductible: 0.00,
+        coinsurance: Math.max(0, coinsurance),
+        remark_codes: [],
+        carc_codes: [],
+      }
+    }
+
+    let allowed = 0, primaryPaid = 0, deductible = 0, coinsurance = 0
+
+    if (isCO22WithPayment) {
+      // Distribute Medicare payment proportionally by billed amount
+      const ratio = billed / totalCharge
+      primaryPaid = Math.round(primaryPaidAmount * ratio * 100) / 100
+      // Allowed = primary paid / 0.80 (Medicare pays 80%)
+      allowed = Math.round((primaryPaid / 0.80) * 100) / 100
+      coinsurance = Math.round((allowed - primaryPaid) * 100) / 100
+    }
+
+    return {
+      dos: formatDate(claim.dateOfService),
+      cpt_code: cpt,
+      modifiers: [],
+      billed_amount: billed,
+      allowed_amount: allowed,
+      paid_amount: primaryPaid,
+      primary_paid_amount: primaryPaid,
+      tmr: 0.00,
+      copay: 0.00,
+      deductible: deductible,
+      coinsurance: coinsurance,
+      remark_codes: [remarkCode],
+      carc_codes: [carcCode],
+    }
+  })
+
+  // Build contextual rule results based on the actual denial code
+  const buildMockAnalysis = () => {
+    const code = denial.denial_code
+    const dos = formatDate(claim.dateOfService)
+    const memberId = activeTab === 'primary' ? claim.primaryMemberId : (claim.secondaryMemberId ?? '')
+    const payer = currentPlan ?? ''
+
+    if (code === 'CO-27') {
+      // Coverage terminated before DOS — policy lapsed at year end
+      return {
+        rules: [
+          {
+            rule_name: 'Eligibility Denial Confirmed',
+            decision_question: 'Is this claim denied due to an eligibility issue?',
+            status: 'PASSED' as const,
+            explanation: `CARC code CO-27 ("Expenses incurred after coverage terminated") confirms this is an eligibility-based denial. The payer's adjudication system detected that the member's policy end date preceded the date of service ${dos}.`,
+            data_used: {
+              denialCode: 'CO-27',
+              denialCategory: 'Eligibility Denial',
+              claimStatus: 'DENIED',
+              dateOfService: dos,
+              lineItemsDenied: claim.deniedLineItems ?? '',
+            },
+          },
+          {
+            rule_name: 'Date of Service Coverage Verification',
+            decision_question: 'Was the patient covered under an active policy on the date of service?',
+            status: 'FAILED' as const,
+            explanation: `EV response confirms the policy for member ${memberId} terminated on 12/31/2025. The date of service ${dos} falls outside the active coverage window. No active plan period covers this DOS.`,
+            data_used: {
+              memberId,
+              payer,
+              coverageStartDate: '01/01/2025',
+              coverageEndDate: '12/31/2025',
+              dateOfService: dos,
+              policyStatus: 'Terminated',
+            },
+          },
+          {
+            rule_name: 'Retro-Eligibility Check',
+            decision_question: 'Has the patient been retroactively reinstated, or is retro-enrollment pending?',
+            status: 'WARNING' as const,
+            explanation: `The DOS is within 45 days of the termination date (12/31/2025). ${payer} allows retroactive reinstatement requests within 60 days of termination if the member re-enrolled during open enrollment. Call ${payer} eligibility line to verify if retro reinstatement has been processed or is pending.`,
+            data_used: {
+              terminationDate: '12/31/2025',
+              dateOfService: dos,
+              daysSinceTermination: '6',
+              retroWindowDays: '60',
+              retroReinstatementPossible: 'Yes — within retro window',
+            },
+          },
+          {
+            rule_name: 'Patient-Policy Link Validation',
+            decision_question: 'Does the member ID, name, and date of birth match payer records?',
+            status: 'PASSED' as const,
+            explanation: `Member ID ${memberId}, patient name, and date of birth all match the payer's subscriber records exactly. The denial is not due to a demographic mismatch — the member was a valid subscriber whose coverage has since lapsed.`,
+            data_used: {
+              memberId,
+              nameOnFile: `${claim.patientFirstName} ${claim.patientLastName}`,
+              dobOnFile: formatDate(claim.dateOfBirth),
+              demographicMatch: 'Confirmed',
+            },
+          },
+          {
+            rule_name: 'Service Coverage Analysis',
+            decision_question: 'Were the billed services covered under the plan prior to termination?',
+            status: 'PASSED' as const,
+            explanation: `CPT codes ${claim.deniedLineItems ?? ''} (oncology E&M and infusion administration) are covered services under the ${payer} plan. The denial is strictly due to the policy lapse — there is no coverage exclusion for these service types.`,
+            data_used: {
+              cptCodes: claim.deniedLineItems ?? '',
+              coveredUnderPlan: 'Yes (when eligible)',
+              exclusionFound: 'No',
+              priorAuthRequired: 'No',
+            },
+          },
+          {
+            rule_name: 'Billing Payer Validation',
+            decision_question: 'Was the claim submitted to the correct payer?',
+            status: 'PASSED' as const,
+            explanation: `Claim was correctly submitted to ${payer} as the primary payer on file. No billing routing error detected.`,
+            data_used: {
+              submittedPayer: payer,
+              payerOnFile: payer,
+              routingCorrect: 'Yes',
+            },
+          },
+          {
+            rule_name: 'Medicare Plan Check',
+            decision_question: 'Is Medicare involved as primary or secondary payer for this patient?',
+            status: 'PASSED' as const,
+            explanation: 'No Medicare enrollment found for this patient at the time of service. Medicare MSP rules do not apply. This denial is solely related to commercial plan termination.',
+            data_used: {
+              medicareEnrolled: 'No',
+              mspApplicable: 'No',
+              cobWithMedicare: 'Not applicable',
+            },
+          },
+          {
+            rule_name: 'Patient Grace Period Check',
+            decision_question: 'Does the plan offer a grace period that covers the date of service?',
+            status: 'WARNING' as const,
+            explanation: `The DOS falls 6 days after the policy termination date. Many commercial plans, including ${payer}, offer a 30-day grace period for claims incurred shortly after termination, particularly when premiums were paid through the termination month. Contact ${payer} to confirm grace period eligibility before submitting an appeal.`,
+            data_used: {
+              terminationDate: '12/31/2025',
+              dateOfService: dos,
+              daysAfterTermination: '6',
+              typicalGracePeriod: '30 days',
+              gracePeriodConfirmed: 'Pending — needs payer verification',
+            },
+          },
+        ] as RuleResult[],
+        plan: {
+          recommended_action:
+            `CO-27 denial — coverage terminated before DOS. Recommended steps: (1) Call ${payer} eligibility line to confirm if retro reinstatement is available; patient re-enrolled on 01/01/2026 which may trigger retro coverage. (2) If retro coverage confirmed, resubmit the claim with updated eligibility start date on file. (3) If grace period applies, submit a written appeal citing the grace period provision with evidence of premium payment through December 2025. (4) If all options are exhausted, bill the patient as self-pay and apply any financial assistance programs available.`,
+          flags: {
+            RetroEligibilityWindow: 'Open (6 days post-termination, within 60-day retro window)',
+            GracePeriodApplicable: 'Verify with payer',
+            PatientReEnrolled: 'Yes — effective 01/01/2026',
+            AppealDeadline: `90 days from denial date (${claim.claimReceivedDate ? formatDate(claim.claimReceivedDate) : 'see EOB'})`,
+          },
+          documents_collected: [
+            'Explanation of Benefits (CO-27)',
+            'Eligibility Verification – Pre-DOS',
+            'Patient Re-Enrollment Confirmation',
+            'Premium Payment History',
+          ],
+        } as ActionPlan,
+      }
+    }
+
+    if (code === 'CO-28') {
+      // Coverage not in effect — member ID not found active in plan on DOS
+      return {
+        rules: [
+          {
+            rule_name: 'Eligibility Denial Confirmed',
+            decision_question: 'Is this claim denied due to an eligibility issue?',
+            status: 'PASSED' as const,
+            explanation: `CARC code CO-28 ("Coverage not in effect at the time the service was provided") confirms an eligibility denial. The payer's enrollment system did not return an active subscriber record for member ${memberId} on ${dos}.`,
+            data_used: {
+              denialCode: 'CO-28',
+              denialCategory: 'Eligibility Denial',
+              claimStatus: 'DENIED',
+              memberId,
+              dateOfService: dos,
+            },
+          },
+          {
+            rule_name: 'Date of Service Coverage Verification',
+            decision_question: 'Was the patient covered under an active policy on the date of service?',
+            status: 'FAILED' as const,
+            explanation: `Real-time eligibility verification returned no active coverage for member ${memberId} under ${payer} on ${dos}. The subscriber record exists in the system but shows a plan status of "Inactive / Disenrolled." Patient may have switched plans during open enrollment (Nov–Dec 2025) and the new carrier ID was not updated in our system.`,
+            data_used: {
+              memberId,
+              payer,
+              evResponseStatus: 'No Active Coverage Found',
+              subscriberRecordStatus: 'Inactive / Disenrolled',
+              dateOfService: dos,
+              possibleCause: 'Plan change during open enrollment period',
+            },
+          },
+          {
+            rule_name: 'Retro-Eligibility Check',
+            decision_question: 'Has a retroactive eligibility update been filed with the payer?',
+            status: 'MANUAL' as const,
+            explanation: `Cannot auto-determine retro eligibility for CO-28 denials without a confirmed new plan number or updated subscriber ID. Manual verification required: contact the patient directly to obtain their current insurance card, then re-verify eligibility with the correct carrier and member ID.`,
+            data_used: {
+              retroStatus: 'Cannot auto-verify',
+              action: 'Contact patient for updated insurance information',
+              alternateCarrierOnFile: 'Unknown',
+            },
+          },
+          {
+            rule_name: 'Patient-Policy Link Validation',
+            decision_question: 'Does the member ID and demographic data match any active plan on file?',
+            status: 'FAILED' as const,
+            explanation: `Member ID ${memberId} is not linked to any active ${payer} plan as of ${dos}. The demographic lookup (name + DOB) also returned no active plan. This suggests the patient is either enrolled under a different plan or a different member ID was issued after open enrollment.`,
+            data_used: {
+              memberId,
+              demographicLookupResult: 'No active plan found',
+              nameSearch: `${claim.patientFirstName} ${claim.patientLastName}`,
+              dobSearch: formatDate(claim.dateOfBirth),
+              alternativePlanFound: 'No',
+            },
+          },
+          {
+            rule_name: 'Service Coverage Analysis',
+            decision_question: 'Are the billed CPT codes covered under any known plan for this patient?',
+            status: 'SKIPPED' as const,
+            explanation: `Coverage analysis skipped — cannot evaluate plan-level CPT coverage without first confirming an active policy. Resolve eligibility verification before re-assessing service coverage.`,
+            data_used: {
+              reason: 'Eligibility not confirmed; coverage analysis deferred',
+            },
+          },
+          {
+            rule_name: 'Billing Payer Validation',
+            decision_question: 'Was the claim submitted to the correct payer?',
+            status: 'WARNING' as const,
+            explanation: `Claim was submitted to ${payer} based on the insurance card on file, but the payer's system shows no active enrollment. The patient may have a new primary carrier as of 01/01/2026. Verify whether the patient switched insurers during open enrollment and whether ${payer} is still the correct payer.`,
+            data_used: {
+              submittedPayer: payer,
+              enrollmentStatus: 'Not active in submitted payer system',
+              possibleNewPayer: 'Unknown — requires patient confirmation',
+            },
+          },
+          {
+            rule_name: 'Medicare Plan Check',
+            decision_question: 'Could the patient have aged into Medicare or enrolled during a special enrollment period?',
+            status: 'WARNING' as const,
+            explanation: `Patient DOB ${formatDate(claim.dateOfBirth)} — patient is ${new Date().getFullYear() - new Date(claim.dateOfBirth).getFullYear()} years old. If the patient recently turned 65 and enrolled in Medicare, this could explain why the commercial plan shows no active coverage. Verify Medicare enrollment status via Medicare eligibility lookup (HETS).`,
+            data_used: {
+              patientAge: `${new Date().getFullYear() - new Date(claim.dateOfBirth).getFullYear()}`,
+              medicareEligibilityAge: '65',
+              medicareEnrollmentVerified: 'Not yet checked',
+              recommendedAction: 'Check HETS for Medicare enrollment',
+            },
+          },
+          {
+            rule_name: 'Patient Grace Period Check',
+            decision_question: 'Is there a grace period that could cover this DOS?',
+            status: 'SKIPPED' as const,
+            explanation: 'Grace period check skipped — CO-28 indicates coverage was never in effect (not terminated), so grace period provisions do not apply. Resolve the underlying enrollment discrepancy first.',
+            data_used: {
+              reason: 'CO-28 (never active) — grace period not applicable',
+            },
+          },
+        ] as RuleResult[],
+        plan: {
+          recommended_action:
+            `CO-28 denial — member ID not active on DOS. Recommended steps: (1) Contact patient immediately to obtain current insurance card; ask if they changed plans during November–December open enrollment. (2) Run a new real-time eligibility check with the updated carrier and member ID. (3) If a new plan is identified, correct the payer and resubmit as a new claim to the correct carrier within timely filing limits. (4) Check HETS to rule out Medicare enrollment. (5) If the patient is uninsured or the plan cannot be identified, apply self-pay discount and review financial assistance eligibility.`,
+          flags: {
+            PatientContactRequired: 'Yes — obtain current insurance card',
+            NewEligibilityCheckNeeded: 'Yes — re-verify with updated info',
+            MedicareEnrollmentCheck: 'Recommended (HETS lookup)',
+            TimelyFilingDeadline: 'Monitor — do not let lapse while investigating',
+          },
+          documents_collected: [
+            'Explanation of Benefits (CO-28)',
+            'Real-Time Eligibility Response',
+            'Patient Insurance Update Form',
+            'HETS Medicare Eligibility Query',
+          ],
+        } as ActionPlan,
+      }
+    }
+
+    if (code === 'CO-97') {
+      // Bundling denial — E&M denied same day as infusion; modifier 25 missing
+      const paidCpts = (claim.remarks ?? '').match(/Paid CPTs?:\s*([^.\n]+)/)?.[1] ?? '96413, 96415, J9355'
+      const paidAmt = formatCurrency(primaryPaidAmount)
+      return {
+        rules: [
+          {
+            rule_name: 'Bundling Denial Confirmed',
+            decision_question: 'Was this claim denied due to NCCI bundling rules?',
+            status: 'PASSED' as const,
+            explanation: `CARC code CO-97 confirms a bundling denial. ${payer} determined that CPT ${claim.deniedLineItems} is included in the payment for another service billed on the same date (${dos}). Payer adjudicated and paid ${paidAmt} for ${paidCpts} but denied the E&M as bundled per National Correct Coding Initiative (NCCI) edits.`,
+            data_used: { denialCode: 'CO-97', denialCategory: 'Billing / Bundling Denial', paidCPTs: paidCpts, deniedCPTs: claim.deniedLineItems ?? '', paidAmount: paidAmt },
+          },
+          {
+            rule_name: 'Modifier 25 Check',
+            decision_question: 'Was modifier 25 appended to the E&M code to indicate a separately identifiable service?',
+            status: 'FAILED' as const,
+            explanation: `CPT ${claim.deniedLineItems} was submitted without modifier 25. Per NCCI policy, when an E&M service is billed on the same day as a procedure or infusion, modifier 25 ("Significant, separately identifiable evaluation and management service by the same physician on the day of a procedure") must be appended to the E&M code. Without modifier 25, ${payer}'s system automatically bundles the E&M into the infusion payment.`,
+            data_used: { missingModifier: '25', requiredBy: 'NCCI Bundling Edits', deniedCPT: claim.deniedLineItems ?? '', bundledWith: paidCpts },
+          },
+          {
+            rule_name: 'NCCI Edit Validation',
+            decision_question: 'Do NCCI edits confirm that modifier 25 allows separate billing of the E&M?',
+            status: 'PASSED' as const,
+            explanation: `NCCI Column 1/Column 2 edits confirm that CPT ${claim.deniedLineItems} is bundled with infusion administration codes. However, the edit has a modifier indicator of "1," meaning the bundle CAN be bypassed with the correct modifier (modifier 25). The denial is correctable by resubmitting with modifier 25 appended to ${claim.deniedLineItems}.`,
+            data_used: { ncciEditStatus: 'Bundled — modifier 25 bypass available', modifierIndicator: '1', correctionPath: `Resubmit ${claim.deniedLineItems}-25` },
+          },
+          {
+            rule_name: 'Clinical Documentation Review',
+            decision_question: 'Is there documentation supporting a distinct E&M visit separate from the infusion?',
+            status: 'MANUAL' as const,
+            explanation: `To support the modifier 25 claim on appeal, clinical documentation must show that the E&M (${claim.deniedLineItems}) addressed a problem or clinical decision beyond the infusion administration itself. Review the progress note for ${dos} to confirm a separately identifiable chief complaint, history, exam, and medical decision-making distinct from infusion management.`,
+            data_used: { documentationRequired: 'Progress note demonstrating separate medical decision-making', dateOfService: dos, cptUnderReview: claim.deniedLineItems ?? '' },
+          },
+          {
+            rule_name: 'Resubmission Eligibility Check',
+            decision_question: 'Is the corrected claim within the timely filing window?',
+            status: 'WARNING' as const,
+            explanation: `${payer} generally allows corrected claim resubmission within 365 days of the DOS. DOS is ${dos}. Verify the exact corrected claim deadline in the ${payer} provider contract to ensure the resubmission will be accepted. Act promptly to avoid timely filing denial.`,
+            data_used: { dateOfService: dos, typicalCorrectedClaimWindow: '365 days from DOS', action: `Resubmit ${claim.deniedLineItems}-25 with updated modifier` },
+          },
+        ] as RuleResult[],
+        plan: {
+          recommended_action:
+            `CO-97 bundling denial — CPT ${claim.deniedLineItems} denied as included in infusion payment. ${payer} paid ${paidAmt} for ${paidCpts}. To recover the denied E&M: (1) Pull the progress note for ${dos} and confirm it documents a separately identifiable service beyond infusion management. (2) Resubmit a corrected claim with modifier 25 appended to CPT ${claim.deniedLineItems} (i.e., ${claim.deniedLineItems}-25). (3) Attach the supporting clinical note to the corrected claim. (4) Verify corrected claim is submitted within ${payer}'s timely filing window from DOS (${dos}).`,
+          flags: {
+            DeniedCPT: claim.deniedLineItems ?? '',
+            RequiredModifier: '25 (Significant, separately identifiable E&M)',
+            PaidCPTs: paidCpts,
+            AmountAlreadyPaid: paidAmt,
+            NCCIBypassAvailable: 'Yes — modifier indicator 1',
+            Action: `Resubmit corrected claim: ${claim.deniedLineItems}-25 with clinical note`,
+          },
+          documents_collected: [
+            'Original EOB with CO-97 denial',
+            `Progress note for ${dos} (supporting separate E&M)`,
+            'Corrected Claim (837P) with modifier 25',
+            'NCCI Edit Reference for CPT bundle',
+          ],
+        } as ActionPlan,
+      }
+    }
+
+    if (code === 'CO-50') {
+      // Medical necessity denial — additional infusion hours and drug not pre-authorized
+      const paidCpts = (claim.remarks ?? '').match(/Paid CPTs?:\s*([^.\n]+)/)?.[1] ?? '99215, 96413'
+      const paidAmt = formatCurrency(primaryPaidAmount)
+      const deniedCpts = claim.deniedLineItems ?? '96415, 96417, J9355'
+      return {
+        rules: [
+          {
+            rule_name: 'Medical Necessity Denial Confirmed',
+            decision_question: 'Was this claim denied due to medical necessity?',
+            status: 'PASSED' as const,
+            explanation: `CARC code CO-50 confirms a medical necessity denial. ${payer} paid ${paidAmt} for ${paidCpts} but determined that ${deniedCpts} were not medically necessary for this patient on ${dos}. The payer's clinical criteria were not met for the additional infusion duration and drug regimen.`,
+            data_used: { denialCode: 'CO-50', denialCategory: 'Medical Necessity Denial', paidCPTs: paidCpts, deniedCPTs: deniedCpts, paidAmount: paidAmt },
+          },
+          {
+            rule_name: 'Prior Authorization Verification',
+            decision_question: 'Was prior authorization obtained for the denied services?',
+            status: 'FAILED' as const,
+            explanation: `${payer} records show no prior authorization on file for ${deniedCpts} on DOS ${dos}. Per ${payer}'s clinical policy, extended infusion durations beyond the initial hour and the specific drug regimen require pre-authorization. Services were rendered without authorization, triggering the CO-50 denial.`,
+            data_used: { priorAuthOnFile: 'No', deniedServices: deniedCpts, policyRequirement: `${payer} clinical criteria — PA required for extended infusion and drug`, dateOfService: dos },
+          },
+          {
+            rule_name: 'Clinical Criteria Assessment',
+            decision_question: 'Do the clinical notes support medical necessity for the denied services?',
+            status: 'MANUAL' as const,
+            explanation: `Manual review required. Pull the treating physician's order, oncology treatment plan, and progress notes for ${dos}. Confirm the clinical rationale for the extended infusion duration and drug selection. Evidence of active oncological diagnosis, prior treatment response, and physician-documented medical necessity will be required for appeal.`,
+            data_used: { reviewRequired: 'Yes — clinical notes and treatment plan', deniedServices: deniedCpts, appealEvidence: 'Physician order, diagnosis confirmation, treatment protocol' },
+          },
+          {
+            rule_name: 'LCD / Coverage Policy Review',
+            decision_question: 'Are the denied services covered under the applicable LCD or coverage policy?',
+            status: 'WARNING' as const,
+            explanation: `${payer} may apply a Local Coverage Determination (LCD) or internal clinical policy for infusion drug coverage. Verify that the patient's diagnosis codes support coverage of ${deniedCpts} under the applicable LCD. If the LCD supports coverage, include the LCD reference in the appeal.`,
+            data_used: { lcdReviewRequired: 'Yes', deniedServices: deniedCpts, diagnosisCodes: '(see claim)', action: 'Pull applicable LCD and confirm diagnosis-to-drug coverage match' },
+          },
+          {
+            rule_name: 'Retrospective Authorization Request',
+            decision_question: 'Can a retrospective authorization be obtained from the payer?',
+            status: 'WARNING' as const,
+            explanation: `${payer} may allow a retrospective authorization request within 30–60 days of the service date when the treating physician certifies medical necessity. Contact ${payer}'s UM (Utilization Management) department to determine if a retro auth is available for ${deniedCpts} on ${dos}. Approval would allow resubmission of the denied line items.`,
+            data_used: { retroAuthPossible: 'Pending — contact UM department', deniedServices: deniedCpts, dateOfService: dos, typicalWindow: '30–60 days from DOS' },
+          },
+        ] as RuleResult[],
+        plan: {
+          recommended_action:
+            `CO-50 medical necessity denial — ${payer} paid ${paidAmt} for ${paidCpts} but denied ${deniedCpts}. Recommended steps: (1) Pull treating physician's order and clinical notes for ${dos} confirming necessity of extended infusion and drug regimen. (2) Contact ${payer} Utilization Management to request a retrospective authorization for ${deniedCpts}. (3) If retro auth approved, resubmit with auth number. (4) If retro auth denied, prepare a formal medical necessity appeal with: physician certification, oncology treatment protocol, and applicable LCD reference. (5) Confirm patient diagnosis codes on claim align with LCD coverage criteria for these CPTs.`,
+          flags: {
+            DeniedCPTs: deniedCpts,
+            PaidCPTs: paidCpts,
+            AmountAlreadyPaid: paidAmt,
+            PriorAuthOnFile: 'No — retro auth needed',
+            RetroAuthWindow: 'Contact UM — typically 30–60 days from DOS',
+            Action: 'Request retro auth or submit medical necessity appeal',
+          },
+          documents_collected: [
+            'Original EOB with CO-50 denial',
+            `Physician order and progress note for ${dos}`,
+            'Oncology treatment protocol / care plan',
+            'Applicable LCD / coverage policy reference',
+            'Retrospective authorization request form',
+          ],
+        } as ActionPlan,
+      }
+    }
+
+    // CO-22 — Medicare paid as primary; BCBS (secondary) denied because Medicare EOB not attached
+    {
+      const isMedicarePrimary = claim.primaryInsurance?.toLowerCase().includes('medicare')
+      const medicareMemberId = isMedicarePrimary ? claim.primaryMemberId : (claim.secondaryMemberId ?? '')
+      const commercialPayer = isMedicarePrimary ? (claim.secondaryInsurance ?? payer) : claim.primaryInsurance
+      const commercialMemberId = isMedicarePrimary ? (claim.secondaryMemberId ?? '') : claim.primaryMemberId
+      const deniedLineItemsCO22 = (activeTab === 'primary' ? claim.deniedLineItems : (claim.secondaryDeniedLineItems ?? claim.deniedLineItems)) ?? ''
+      const medicarePaymentAmt = primaryPaidAmount > 0 ? formatCurrency(primaryPaidAmount) : 'see Medicare EOMB'
+      const medicareCheckNum = claim.checkNumber ?? 'see EOMB'
+      const medicarePaymentDate = claim.checkDate ? formatDate(claim.checkDate) : 'see EOMB'
+      const remainingBalance = primaryPaidAmount > 0
+        ? formatCurrency(Math.round((Number(claim.chargeAmount) - primaryPaidAmount) * 100) / 100)
+        : 'see EOMB'
+
+      return {
+        rules: [
+          {
+            rule_name: 'Eligibility Denial Confirmed',
+            decision_question: 'Is this claim denied due to an eligibility or COB documentation issue?',
+            status: 'PASSED' as const,
+            explanation: `CARC code CO-22 ("This care may be covered by another payer per coordination of benefits") with RARC N104 confirms a COB documentation denial. ${commercialPayer} received the secondary claim without the Medicare EOMB attached. Without the primary EOMB, ${commercialPayer} cannot confirm Medicare's adjudication or compute the correct secondary payment.`,
+            data_used: {
+              denialCode: 'CO-22',
+              remarkCode: 'N104',
+              denialCategory: 'COB Documentation – Missing Primary EOB',
+              claimStatus: 'DENIED',
+              submittedTo: commercialPayer,
+              missingDocument: 'Medicare Explanation of Benefits (EOMB)',
+            },
+          },
+          {
+            rule_name: 'Primary Claim Adjudication Status',
+            decision_question: 'Has Medicare (primary payer) adjudicated and paid the claim?',
+            status: 'PASSED' as const,
+            explanation: `Medicare adjudicated this claim and issued payment of ${medicarePaymentAmt} via EFT (${medicareCheckNum}) on ${medicarePaymentDate}. Medicare processed CPT codes ${deniedLineItemsCO22 || 'as submitted'} under Part B. The Medicare EOMB is available and must now be attached to the secondary claim submission to ${commercialPayer}.`,
+            data_used: {
+              medicareMemberId,
+              medicareClaimNumber: claim.claimNumber ?? 'see EOMB',
+              medicarePaidAmount: medicarePaymentAmt,
+              medicareEFTNumber: medicareCheckNum,
+              medicarePaymentDate,
+              primaryAdjudicationStatus: 'PAID',
+            },
+          },
+          {
+            rule_name: 'Date of Service Coverage Verification',
+            decision_question: 'Was the patient covered by both plans on the date of service?',
+            status: 'PASSED' as const,
+            explanation: `Patient had active dual coverage on ${dos}: Medicare (member ${medicareMemberId}) as primary and ${commercialPayer} (member ${commercialMemberId}) as secondary. Both plans were in effect. The denial is not due to eligibility issues — it is a COB documentation error on the secondary claim submission.`,
+            data_used: {
+              medicareCoverageStatus: 'Active on DOS',
+              secondaryCoverageStatus: `Active on DOS — ${commercialPayer}`,
+              dateOfService: dos,
+              dualCoverageConfirmed: 'Yes',
+            },
+          },
+          {
+            rule_name: 'Patient-Policy Link Validation',
+            decision_question: 'Is the patient correctly enrolled in both Medicare and the secondary plan?',
+            status: 'PASSED' as const,
+            explanation: `Demographics verified across both payers. Medicare: member ${medicareMemberId} — active, correct DOB and name on file. ${commercialPayer}: member ${commercialMemberId} — active subscriber, demographics confirmed. No enrollment discrepancy found.`,
+            data_used: {
+              primaryPayer: 'Medicare',
+              primaryMemberId: medicareMemberId,
+              secondaryPayer: commercialPayer,
+              secondaryMemberId: commercialMemberId,
+              demographicMatch: 'Confirmed on both plans',
+            },
+          },
+          {
+            rule_name: 'Primary EOB Attachment Verification',
+            decision_question: 'Was the Medicare EOMB attached to the secondary claim submission?',
+            status: 'FAILED' as const,
+            explanation: `The secondary claim submitted to ${commercialPayer} did not include the Medicare EOMB. Per ${commercialPayer} COB policy and CMS COB guidelines, secondary payers require the primary payer's EOMB to determine their payment obligation. Without the EOMB, ${commercialPayer} cannot verify Medicare's allowed amount, patient responsibility, or crossover balance.`,
+            data_used: {
+              eobAttachedToSecondaryClaim: 'No',
+              medicareEFTNumber: medicareCheckNum,
+              medicarePaymentDate,
+              requiredBy: `${commercialPayer} COB policy / CMS secondary billing guidelines`,
+              correctionRequired: `Resubmit with Medicare EOMB (${medicareCheckNum}) attached`,
+            },
+          },
+          {
+            rule_name: 'Secondary Claim Submission Validation',
+            decision_question: 'Was the secondary claim correctly submitted as a COB crossover claim?',
+            status: 'FAILED' as const,
+            explanation: `The claim was submitted to ${commercialPayer} without the 837P COB loop (Loop 2320 / CAS segments) populated with Medicare's adjudication data. Secondary COB claims must include Medicare's allowed amount, paid amount, and patient responsibility in the COB information segment so ${commercialPayer} can compute the correct crossover benefit.`,
+            data_used: {
+              cobLoopPopulated: 'No — CAS/COB segments missing',
+              medicareAllowedAmountSubmitted: 'Not submitted',
+              medicarePaidAmountSubmitted: 'Not submitted',
+              correctionRequired: 'Resubmit 837P with Loop 2320 COB data populated from Medicare EOMB',
+            },
+          },
+          {
+            rule_name: 'Service Coverage Analysis',
+            decision_question: 'Are the billed services covered under Medicare and the secondary plan?',
+            status: 'PASSED' as const,
+            explanation: `CPT codes ${deniedLineItemsCO22 || 'as submitted'} are covered under Medicare Part B for oncology services — confirmed by Medicare's payment. ${commercialPayer} covers these services as secondary after Medicare adjudication. Once the corrected claim with EOMB is submitted, ${commercialPayer} will process the crossover balance of ${remainingBalance}.`,
+            data_used: {
+              cptCodes: deniedLineItemsCO22,
+              medicarePartBCoverage: 'Confirmed — Medicare paid',
+              secondaryCoverage: `Covered — ${commercialPayer} will process after EOMB`,
+              estimatedCrossoverBalance: remainingBalance,
+            },
+          },
+          {
+            rule_name: 'Timely Filing Check',
+            decision_question: 'Is the secondary claim within the timely filing window for resubmission?',
+            status: 'WARNING' as const,
+            explanation: `${commercialPayer} typically requires secondary claims to be filed within 180 days of the primary payer's EOMB date. Medicare paid on ${medicarePaymentDate}. Prompt resubmission is critical — verify the exact timely filing limit in the ${commercialPayer} contract to ensure the corrected claim will be accepted.`,
+            data_used: {
+              medicarePaymentDate,
+              typicalTimelyFilingWindow: '180 days from primary EOMB date',
+              correctedClaimDeadline: 'Verify with payer contract — act promptly',
+              risk: 'Denial for timely filing if resubmission is delayed',
+            },
+          },
+        ] as RuleResult[],
+        plan: {
+          recommended_action:
+            `CO-22 denial — Medicare EOMB not attached to secondary ${commercialPayer} claim. Medicare already paid ${medicarePaymentAmt} (EFT ${medicareCheckNum}, ${medicarePaymentDate}). Recommended steps: (1) Obtain the Medicare EOMB for claim ${claim.claimNumber ?? claim.claimId} showing allowed amount and patient responsibility. (2) Resubmit the claim to ${commercialPayer} as a secondary COB claim with the Medicare EOMB attached. (3) Populate the 837P Loop 2320 COB segments: Medicare allowed amount, Medicare paid amount (${medicarePaymentAmt}), and patient responsibility. (4) Verify the 837P SBR01 payer responsibility sequence is set to "S" (secondary) for ${commercialPayer}. (5) Submit within ${commercialPayer} timely filing window from the Medicare EOMB date (${medicarePaymentDate}).`,
+          flags: {
+            MedicarePaid: medicarePaymentAmt,
+            MedicareEFTNumber: medicareCheckNum,
+            MedicarePaymentDate: medicarePaymentDate,
+            EstimatedCrossoverBalance: remainingBalance,
+            Action: `Resubmit to ${commercialPayer} with Medicare EOMB attached`,
+            EDI837Fix: 'Populate Loop 2320 COB segments with Medicare adjudication data',
+          },
+          documents_collected: [
+            'Medicare EOMB (EFT payment confirmation)',
+            'Original Secondary Claim (denied CO-22)',
+            'Medicare Eligibility Confirmation',
+            'MSP Questionnaire',
+          ],
+        } as ActionPlan,
+      }
+    }
+  }
+
+  // Simulate the two-phase analysis with mock data
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setRuleResults(null)
+    setActionPlan(null)
+
+    const t1 = setTimeout(() => {
+      if (cancelled) return
+      setLoading(false)
+
+      const t2 = setTimeout(() => {
+        if (cancelled) return
+        const { rules, plan } = buildMockAnalysis()
+        setRuleResults(rules)
+        setActionPlan(plan)
+      }, 2000)
+
+      return () => clearTimeout(t2)
+    }, 900)
+
+    return () => {
+      cancelled = true
+      clearTimeout(t1)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
+
+  const handleSetDenialStage = async (stage: DenialStage) => {
+    setSaving(stage)
+    try {
+      await fetch(`/api/claims/${claim.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ denialStage: stage }),
+      })
+      setCurrentDenialStage(stage)
+      onSave()
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  return (
+    <div className="flex-1 flex flex-col h-screen bg-white">
+      {/* Header */}
+      <div className="px-6 py-4 border-b border-gray-200">
+        <h2 className="text-lg font-semibold text-gray-900">
+          {claim.patientFirstName} {claim.patientLastName}{' '}
+          <span className="font-normal text-gray-500">({claim.mrn})</span>
+        </h2>
+      </div>
+
+      {/* Insurance Tabs */}
+      <div className="px-6 border-b border-gray-200">
+        <div className="flex gap-6">
+          <button
+            className={`py-3 text-sm font-medium border-b-2 -mb-px ${
+              activeTab === 'primary'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+            onClick={() => setActiveTab('primary')}
+          >
+            Primary: {claim.primaryInsurance}
+          </button>
+          {claim.secondaryInsurance && (
+            <button
+              className={`py-3 text-sm font-medium border-b-2 -mb-px ${
+                activeTab === 'secondary'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+              onClick={() => setActiveTab('secondary')}
+            >
+              Secondary: {claim.secondaryInsurance}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Info Row */}
+      <div className="px-6 py-3 bg-gray-50 border-b border-gray-200">
+        <div className="grid grid-cols-8 gap-4 text-xs">
+          <div>
+            <span className="text-gray-500 uppercase block">DOB</span>
+            <span className="font-medium text-gray-900">{formatDate(claim.dateOfBirth)}</span>
+          </div>
+          <div>
+            <span className="text-gray-500 uppercase block">Plan</span>
+            <span className="font-medium text-gray-900">{currentPlan}</span>
+          </div>
+          <div>
+            <span className="text-gray-500 uppercase block">DOS</span>
+            <span className="font-medium text-gray-900">{formatDate(claim.dateOfService)}</span>
+          </div>
+          <div>
+            <span className="text-gray-500 uppercase block">Billed Amount</span>
+            <span className="font-medium text-gray-900">{formatCurrency(billedAmount)}</span>
+          </div>
+          <div>
+            <span className="text-gray-500 uppercase block">Primary Paid Amt</span>
+            <span className={`font-medium ${primaryPaidAmount > 0 ? 'text-green-700' : 'text-gray-400'}`}>
+              {primaryPaidAmount > 0 ? formatCurrency(primaryPaidAmount) : '—'}
+            </span>
+          </div>
+          <div>
+            <span className="text-gray-500 uppercase block">Claim Received</span>
+            <span className="font-medium text-gray-900">{claimReceivedDate || '—'}</span>
+          </div>
+          <div>
+            <span className="text-gray-500 uppercase block">Claim Number</span>
+            <span className="font-medium text-gray-900">{claimNumber || '—'}</span>
+          </div>
+          <div>
+            <span className="text-gray-500 uppercase block">Denial Age</span>
+            <span className="font-medium text-gray-900">
+              {denialAge != null ? `${denialAge} Days` : '—'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Content Tabs */}
+      <div className="px-6 border-b border-gray-200">
+        <div className="flex gap-6">
+          {(['service-lines', 'documents'] as const).map((t) => (
+            <button
+              key={t}
+              className={`py-3 text-sm font-medium border-b-2 -mb-px ${
+                contentTab === t
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+              onClick={() => setContentTab(t)}
+            >
+              {t === 'service-lines' ? 'Dx, Service Lines & Remits' : 'Documents'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Main Split Layout */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Panel */}
+        <div className="w-[45%] border-r border-gray-200 overflow-y-auto p-6">
+          {loading ? (
+            <div className="space-y-3">
+              <div className="h-24 bg-gray-100 rounded animate-pulse" />
+              <div className="h-32 bg-gray-100 rounded animate-pulse" />
+            </div>
+          ) : contentTab === 'service-lines' ? (
+            <>
+              <DenialSummary denial={denial} />
+              <ServiceLinesTable lines={mockServiceLines} />
+            </>
+          ) : (
+            <MockDocumentsTab claim={claim} denial={denial} />
+          )}
+        </div>
+
+        {/* Right Panel */}
+        <div className="flex-1 overflow-y-auto p-6">
+          <AutomatedAnalysis
+            ruleResults={ruleResults}
+            actionPlan={actionPlan}
+            loading={loading || (ruleResults === null && !loading)}
+            onViewCoverLetter={() => setShowCoverLetter(true)}
+          />
+        </div>
+      </div>
+
+      {/* Cover Letter Modal */}
+      {showCoverLetter && (
+        <CoverLetterModal
+          claim={claim}
+          denial={denial}
+          actionPlan={actionPlan}
+          onClose={() => setShowCoverLetter(false)}
+        />
+      )}
+
+      {/* Footer */}
+      <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+        <Button variant="outline" onClick={onBack}>
+          Go Back
+        </Button>
+        <div className="flex items-center gap-3">
+          {currentDenialStage && (
+            <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+              currentDenialStage === 'RESOLVED'
+                ? 'bg-green-100 text-green-700'
+                : 'bg-yellow-100 text-yellow-700'
+            }`}>
+              {currentDenialStage === 'RESOLVED' ? 'Resolved' : 'Reviewed'}
+            </span>
+          )}
+          <Button
+            variant="outline"
+            className="border-yellow-400 text-yellow-700 hover:bg-yellow-50"
+            disabled={saving !== null || currentDenialStage === 'REVIEWED' || currentDenialStage === 'RESOLVED'}
+            onClick={() => handleSetDenialStage('REVIEWED')}
+          >
+            {saving === 'REVIEWED' ? 'Saving…' : 'Mark as Reviewed'}
+          </Button>
+          <Button
+            className="bg-green-600 hover:bg-green-700 text-white"
+            disabled={saving !== null || currentDenialStage === 'RESOLVED'}
+            onClick={() => handleSetDenialStage('RESOLVED')}
+          >
+            {saving === 'RESOLVED' ? 'Saving…' : 'Mark as Resolved'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
