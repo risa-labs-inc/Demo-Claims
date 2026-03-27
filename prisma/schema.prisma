@@ -87,4 +87,10 @@ model Claim {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([stage])
+  @@index([claimStatus])
+  @@index([assignedToId])
+  @@index([createdAt])
+  @@index([dateOfService])
 }

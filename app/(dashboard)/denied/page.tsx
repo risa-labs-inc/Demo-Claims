@@ -1,12 +1,30 @@
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
 import { ClaimsTable } from '@/components/claims/ClaimsTable'
+import prisma from '@/lib/prisma'
+import { serializeClaims } from '@/lib/serialize'
 
-export default function DeniedCasesPage() {
+export default async function DeniedCasesPage() {
+  const session = await getServerSession(authOptions)
+  const userName = session?.user?.name || ''
+
+  const raw = await prisma.claim.findMany({
+    where: {
+      claimStatus: 'DENIED',
+      ...(userName ? { assignedTo: { name: userName } } : {}),
+    },
+    include: { assignedTo: { select: { id: true, name: true, email: true } } },
+    orderBy: { createdAt: 'asc' },
+    take: 100,
+  })
+
   return (
     <ClaimsTable
       title="My Denied Cases"
       filterByClaimStatus={['DENIED']}
-      filterByAssignee="John Doe"
+      filterByAssignee={userName}
       showDenialStage
+      initialClaims={serializeClaims(raw)}
     />
   )
 }

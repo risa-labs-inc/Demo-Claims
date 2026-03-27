@@ -8,7 +8,7 @@ import {
   FileText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getAuthUser, clearAuthUser } from '@/lib/client-auth'
+import { useSession, signOut } from 'next-auth/react'
 
 interface NavItem {
   label: string
@@ -26,11 +26,11 @@ const worklistItems: NavItem[] = [
 
 export function Sidebar() {
   const pathname = usePathname()
-  const user = getAuthUser()
+  const { data: session } = useSession()
+  const user = session?.user
 
   const handleSignOut = () => {
-    clearAuthUser()
-    window.location.href = '/login'
+    signOut({ callbackUrl: '/login' })
   }
 
   return (

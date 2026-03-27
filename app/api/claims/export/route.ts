@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams
     const search = searchParams.get('search')
     const stage = searchParams.get('stage')
+    const providerNpi = searchParams.get('providerNpi')
 
     const where: Record<string, unknown> = {}
 
@@ -15,13 +16,20 @@ export async function GET(request: NextRequest) {
       where.stage = stage
     }
 
+    if (providerNpi) {
+      const npiList = providerNpi.split(',').filter(Boolean)
+      if (npiList.length > 0) {
+        where.providerNpi = { in: npiList }
+      }
+    }
+
     if (search) {
       where.OR = [
-        { patientFirstName: { contains: search } },
-        { patientLastName: { contains: search } },
-        { primaryMemberId: { contains: search } },
-        { secondaryMemberId: { contains: search } },
-        { claimId: { contains: search } },
+        { patientFirstName: { contains: search, mode: 'insensitive' } },
+        { patientLastName: { contains: search, mode: 'insensitive' } },
+        { primaryMemberId: { contains: search, mode: 'insensitive' } },
+        { secondaryMemberId: { contains: search, mode: 'insensitive' } },
+        { claimId: { contains: search, mode: 'insensitive' } },
       ]
     }
 

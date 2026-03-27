@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { ClaimWithAssignee } from '@/lib/types'
 import { formatDate, formatCurrency } from '@/lib/utils'
 import { MockDocumentsTab } from './MockDocumentsTab'
+import { DocViewerPopup } from './DocViewerPopup'
+import { distributeBilledAmounts } from '@/lib/cpt-rates'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -130,6 +132,12 @@ function CoverLetterModal({
   actionPlan: ActionPlan | null
   onClose: () => void
 }) {
+  const [pmsStatus, setPmsStatus] = useState<'idle' | 'sending' | 'sent'>('idle')
+
+  const handleSendToPMS = () => {
+    setPmsStatus('sending')
+    setTimeout(() => setPmsStatus('sent'), 2200)
+  }
   const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
   const dos = formatDate(claim.dateOfService)
   const code = denial.denial_code
@@ -341,13 +349,40 @@ Please reprocess this claim as a secondary COB claim upon receipt of the enclose
           <div className="flex items-center gap-2">
             <button
               onClick={handleDownload}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-gray-900 text-white rounded hover:bg-gray-700"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
             >
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               Download PDF
             </button>
+            {pmsStatus === 'idle' && (
+              <button
+                onClick={handleSendToPMS}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Send to PMS
+              </button>
+            )}
+            {pmsStatus === 'sending' && (
+              <span className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-100 text-blue-600 rounded animate-pulse">
+                <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Pushing to PMS…
+              </span>
+            )}
+            {pmsStatus === 'sent' && (
+              <span className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-green-100 text-green-700 rounded">
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                Sent to PMS
+              </span>
+            )}
             <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 rounded">
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -355,6 +390,21 @@ Please reprocess this claim as a secondary COB claim upon receipt of the enclose
             </button>
           </div>
         </div>
+
+        {/* PMS push banner */}
+        {pmsStatus === 'sent' && (
+          <div className="mx-6 mt-4 flex items-start gap-3 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+            <svg className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            <div>
+              <p className="text-xs font-semibold text-green-800">Template automatically pushed to PMS</p>
+              <p className="text-xs text-green-700 mt-0.5">
+                The appeal letter for <strong>{claim.patientFirstName} {claim.patientLastName}</strong> has been automatically inserted into the PMS under claim <strong>{claim.claimNumber ?? claim.claimId}</strong>. No manual copy-paste required.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Letter content */}
         <div className="flex-1 overflow-y-auto p-8 bg-gray-50">
@@ -365,7 +415,7 @@ Please reprocess this claim as a secondary COB claim upon receipt of the enclose
           >
             {/* Letterhead */}
             <div className="border-b-2 border-gray-900 pb-4 mb-6">
-              <div className="text-base font-bold tracking-wide">RISA ONCOLOGY BILLING SERVICES</div>
+              <div className="text-base font-bold tracking-wide">MEDICAL ONCOLOGY BILLING SERVICES</div>
               <div className="text-xs text-gray-500 mt-0.5">123 Medical Plaza, Suite 400 · San Francisco, CA 94107 · Tel: (415) 555-0100 · Fax: (415) 555-0199</div>
             </div>
 
@@ -391,7 +441,7 @@ Please reprocess this claim as a secondary COB claim upon receipt of the enclose
               <div className="mt-6 mb-1 border-b border-gray-400 w-48" />
               <p className="font-semibold">{claim.providerFirstName} {claim.providerLastName}</p>
               <p className="text-xs text-gray-500">Attending Physician | NPI: {claim.providerNpi}</p>
-              <p className="text-xs text-gray-500 mt-1">RISA Oncology Billing Services</p>
+              <p className="text-xs text-gray-500 mt-1">Medical Oncology Billing Services</p>
             </div>
 
             {/* Footer note */}
@@ -412,11 +462,13 @@ function AutomatedAnalysis({
   actionPlan,
   loading,
   onViewCoverLetter,
+  onDocClick,
 }: {
   ruleResults: RuleResult[] | null
   actionPlan: ActionPlan | null
   loading: boolean
   onViewCoverLetter: () => void
+  onDocClick: (docName: string) => void
 }) {
   const [activeTab, setActiveTab] = useState(0)
 
@@ -519,8 +571,12 @@ function AutomatedAnalysis({
                     {actionPlan.documents_collected.map((doc) => (
                       <button
                         key={doc}
-                        className="px-3 py-1.5 text-sm border border-gray-200 rounded hover:bg-gray-50"
+                        onClick={() => onDocClick(doc)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors group"
                       >
+                        <svg className="h-3.5 w-3.5 text-gray-400 group-hover:text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
                         {doc}
                       </button>
                     ))}
@@ -735,6 +791,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
   const [saving, setSaving] = useState<DenialStage | null>(null)
   const [currentDenialStage, setCurrentDenialStage] = useState<string | null>(claim.denialStage ?? null)
   const [showCoverLetter, setShowCoverLetter] = useState(false)
+  const [viewingDoc, setViewingDoc] = useState<string | null>(null)
 
   const currentPlan = activeTab === 'primary' ? claim.primaryInsurance : claim.secondaryInsurance
 
@@ -816,13 +873,11 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
     ? [...paidCptList, ...deniedCptList]
     : deniedCptList
 
-  // Spread charge evenly; first line gets the remainder so total is exact
-  const perLine = Math.floor((totalCharge / cptList.length) * 100) / 100
+  // Distribute charge by CPT rate weight so each line has a realistic distinct amount
+  const billedByCode = distributeBilledAmounts(cptList, totalCharge)
   const isCO22WithPayment = denial.denial_code === 'CO-22' && primaryPaidAmount > 0
   const mockServiceLines: ServiceLine[] = cptList.map((cpt, i) => {
-    const billed = i === cptList.length - 1
-      ? Math.round((totalCharge - perLine * (cptList.length - 1)) * 100) / 100
-      : perLine
+    const billed = billedByCode[cpt] ?? 0
 
     // Paid CPT lines for partially paid claims — show actual payment, no denial codes
     if (isPartiallyPaid && paidCptList.includes(cpt)) {
@@ -1557,6 +1612,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             actionPlan={actionPlan}
             loading={loading || (ruleResults === null && !loading)}
             onViewCoverLetter={() => setShowCoverLetter(true)}
+            onDocClick={(docName) => setViewingDoc(docName)}
           />
         </div>
       </div>
@@ -1568,6 +1624,16 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
           denial={denial}
           actionPlan={actionPlan}
           onClose={() => setShowCoverLetter(false)}
+        />
+      )}
+
+      {/* Document Viewer Popup */}
+      {viewingDoc && (
+        <DocViewerPopup
+          docName={viewingDoc}
+          claim={claim}
+          denial={denial}
+          onClose={() => setViewingDoc(null)}
         />
       )}
 

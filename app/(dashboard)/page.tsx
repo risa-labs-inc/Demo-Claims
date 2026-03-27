@@ -1,5 +1,15 @@
-import { ClaimsTable } from '@/components/claims/ClaimsTable'
+export const dynamic = 'force-dynamic'
 
-export default function DashboardPage() {
-  return <ClaimsTable title="All Claims" />
+import { ClaimsTable } from '@/components/claims/ClaimsTable'
+import prisma from '@/lib/prisma'
+import { serializeClaims } from '@/lib/serialize'
+
+export default async function DashboardPage() {
+  const raw = await prisma.claim.findMany({
+    include: { assignedTo: { select: { id: true, name: true, email: true } } },
+    orderBy: { createdAt: 'asc' },
+    take: 100,
+  })
+
+  return <ClaimsTable title="All Claims" initialClaims={serializeClaims(raw)} />
 }

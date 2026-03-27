@@ -15,6 +15,8 @@ export async function GET(request: NextRequest) {
     const dateFrom = searchParams.get('dateFrom')
     const dateTo = searchParams.get('dateTo')
     const providerNpi = searchParams.get('providerNpi')
+    const page = parseInt(searchParams.get('page') || '1', 10)
+    const pageSize = Math.min(parseInt(searchParams.get('pageSize') || '100', 10), 500)
 
     const where: Record<string, unknown> = {}
 
@@ -76,32 +78,37 @@ export async function GET(request: NextRequest) {
 
     if (search) {
       where.OR = [
-        { patientFirstName: { contains: search } },
-        { patientLastName: { contains: search } },
-        { primaryMemberId: { contains: search } },
-        { secondaryMemberId: { contains: search } },
-        { claimId: { contains: search } },
-        { mrn: { contains: search } },
+        { patientFirstName: { contains: search, mode: 'insensitive' } },
+        { patientLastName: { contains: search, mode: 'insensitive' } },
+        { primaryMemberId: { contains: search, mode: 'insensitive' } },
+        { secondaryMemberId: { contains: search, mode: 'insensitive' } },
+        { claimId: { contains: search, mode: 'insensitive' } },
+        { mrn: { contains: search, mode: 'insensitive' } },
       ]
     }
 
-    const claims = await prisma.claim.findMany({
-      where,
-      include: {
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
+    const [claims, total] = await Promise.all([
+      prisma.claim.findMany({
+        where,
+        include: {
+          assignedTo: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
           },
         },
-      },
-      orderBy: {
-        createdAt: 'asc',
-      },
-    })
+        orderBy: {
+          createdAt: 'asc',
+        },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.claim.count({ where }),
+    ])
 
-    return NextResponse.json(claims)
+    return NextResponse.json({ claims, total, page, pageSize })
   } catch (error) {
     console.error('Failed to fetch claims:', error)
     return NextResponse.json(

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { FileText, ChevronRight, X } from 'lucide-react'
 import { formatDate, formatCurrency } from '@/lib/utils'
 import { ClaimWithAssignee } from '@/lib/types'
+import { distributeBilledAmounts } from '@/lib/cpt-rates'
 
 interface Denial {
   denial_code: string
@@ -140,7 +141,10 @@ function EOBContent({ claim, denial }: MockDocumentsTabProps) {
   const paidCptMatch = isPartial ? (claim.remarks ?? '').match(/Paid CPTs?:\s*([^.\n]+)/) : null
   const paidCpts = paidCptMatch ? paidCptMatch[1].split(',').map(s => s.trim()) : []
   const allCpts = isPartial && paidCpts.length ? [...paidCpts, ...deniedCpts] : deniedCpts
-  const perCpt = Math.round((total / (allCpts.length || 1)) * 100) / 100
+  const billedByCode = distributeBilledAmounts(allCpts, total)
+  const paidByCode = paidCpts.length > 0
+    ? distributeBilledAmounts(paidCpts, paid)
+    : {} as Record<string, number>
 
   return (
     <div className="font-mono text-[11px] text-gray-800 leading-relaxed space-y-3">
@@ -181,14 +185,17 @@ function EOBContent({ claim, denial }: MockDocumentsTabProps) {
           {allCpts.map((cpt, i) => {
             const isPaid = isPartial && paidCpts.includes(cpt)
             const isDenied = deniedCpts.includes(cpt) && !(isPartial && paidCpts.includes(cpt))
-            const linePaid = isPaid ? Math.round((paid / paidCpts.length) * 100) / 100
-              : (!isPartial && paid > 0) ? Math.round((paid / allCpts.length) * 100) / 100
-              : 0
+            const lineBilled = billedByCode[cpt] ?? 0
+            const linePaid = isPaid
+              ? (paidByCode[cpt] ?? 0)
+              : (!isPartial && paid > 0)
+                ? distributeBilledAmounts(allCpts, paid)[cpt] ?? 0
+                : 0
             return (
               <tr key={i} className={`border-b border-gray-100 ${isDenied ? 'bg-red-50' : ''}`}>
                 <td className="px-1.5 py-1 font-medium">{cpt}</td>
-                <td className="px-1.5 py-1">{formatCurrency(perCpt)}</td>
-                <td className="px-1.5 py-1">{isDenied ? '$0.00' : formatCurrency(Math.round(perCpt * 0.85 * 100) / 100)}</td>
+                <td className="px-1.5 py-1">{formatCurrency(lineBilled)}</td>
+                <td className="px-1.5 py-1">{isDenied ? '$0.00' : formatCurrency(Math.round(lineBilled * 0.85 * 100) / 100)}</td>
                 <td className="px-1.5 py-1">{formatCurrency(linePaid)}</td>
                 <td className="px-1.5 py-1 text-red-600">{isDenied ? (code || 'CO-22') : (linePaid > 0 ? '—' : code || '—')}</td>
               </tr>
@@ -247,6 +254,7 @@ function MedicareEOMBContent({ claim }: { claim: ClaimWithAssignee }) {
   const paid = Number(claim.paidAmount) || 0
   const total = Number(claim.chargeAmount)
   const deniedCpts = ((claim.secondaryDeniedLineItems ?? claim.deniedLineItems ?? '99213, 96401, 85730')).split(',').map(s => s.trim())
+  const mcBilledByCode = distributeBilledAmounts(deniedCpts, total)
 
   return (
     <div className="font-mono text-[11px] text-gray-800 leading-relaxed space-y-3">
@@ -280,13 +288,13 @@ function MedicareEOMBContent({ claim }: { claim: ClaimWithAssignee }) {
           </tr>
         </thead>
         <tbody>
-          {deniedCpts.map((cpt, i) => {
-            const billed = Math.round((total / deniedCpts.length) * 100) / 100
+          {deniedCpts.map((cpt) => {
+            const billed = mcBilledByCode[cpt] ?? 0
             const approved = Math.round(billed * 0.85 * 100) / 100
             const mcPaid = Math.round(approved * 0.80 * 100) / 100
             const patResp = Math.round(approved * 0.20 * 100) / 100
             return (
-              <tr key={i} className="border-b border-gray-100">
+              <tr key={cpt} className="border-b border-gray-100">
                 <td className="px-1.5 py-1 font-medium">{cpt}</td>
                 <td className="px-1.5 py-1">{formatCurrency(billed)}</td>
                 <td className="px-1.5 py-1">{formatCurrency(approved)}</td>

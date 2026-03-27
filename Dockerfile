@@ -20,13 +20,9 @@ RUN npx prisma generate
 # Copy all source files
 COPY . .
 
-# Run database migrations and seed
-ENV DATABASE_URL="file:./prisma/dev.db"
-RUN npx prisma db push --accept-data-loss
-RUN npx prisma db seed || echo "Seed completed or skipped"
-
-# Build the application
+# Build the application (DB migrations run at container startup, not build time)
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV DATABASE_URL="postgresql://placeholder@localhost/placeholder"
 RUN npm run build
 
 # Production stage
@@ -52,10 +48,8 @@ COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 # Environment variables
 ENV PORT=8080
 ENV HOSTNAME="0.0.0.0"
-ENV DATABASE_URL="file:./prisma/dev.db"
-ENV NEXTAUTH_SECRET="demo-secret-key-for-claims-dashboard-2024"
-ENV NEXTAUTH_URL="https://risa-claims-demo.web.app"
 ENV NEXTAUTH_TRUST_HOST=true
+# DATABASE_URL, NEXTAUTH_SECRET, and NEXTAUTH_URL must be provided at runtime via environment variables
 
 EXPOSE 8080
 

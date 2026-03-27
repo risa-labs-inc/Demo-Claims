@@ -38,6 +38,7 @@ interface ClaimsTableProps {
   filterByClaimStatus?: string[]
   emptyState?: boolean
   showDenialStage?: boolean
+  initialClaims?: ClaimWithAssignee[]
 }
 
 const emptyFilters: FilterState = {
@@ -79,12 +80,13 @@ export function ClaimsTable({
   filterByClaimStatus,
   emptyState = false,
   showDenialStage = false,
+  initialClaims,
 }: ClaimsTableProps) {
   const { toast } = useToast()
-  const [claims, setClaims] = useState<ClaimWithAssignee[]>([])
+  const [claims, setClaims] = useState<ClaimWithAssignee[]>(initialClaims ?? [])
   const [users, setUsers] = useState<User[]>([])
   const [providers, setProviders] = useState<Provider[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!initialClaims)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedClaim, setSelectedClaim] = useState<ClaimWithAssignee | null>(null)
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
@@ -143,7 +145,7 @@ export function ClaimsTable({
 
       const response = await fetch(`/api/claims?${params}`)
       const data = await response.json()
-      setClaims(data)
+      setClaims(data.claims ?? data)
     } catch (error) {
       console.error('Failed to fetch claims:', error)
       toast({

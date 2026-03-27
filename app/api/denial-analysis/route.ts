@@ -13,11 +13,14 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
     const upstream = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    })
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout))
 
     if (!upstream.ok) {
       const err = await upstream.text()

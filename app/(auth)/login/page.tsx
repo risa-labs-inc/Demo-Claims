@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { signIn, useSession } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { setAuthUser, isAuthenticated } from '@/lib/client-auth'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -13,45 +13,30 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  const { status } = useSession()
 
-  // Redirect if already authenticated
   useEffect(() => {
-    if (isAuthenticated()) {
+    if (status === 'authenticated') {
       router.replace('/')
     }
-  }, [router])
+  }, [status, router])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError('')
 
-    try {
-      // Call our own login API
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      })
+    const result = await signIn('credentials', {
+      email,
+      password,
+      redirect: false,
+    })
 
-      const data = await response.json()
-
-      if (!response.ok) {
-        setError(data.error || 'Invalid email or password')
-      } else {
-        // Store user in localStorage
-        setAuthUser({
-          id: data.user.id,
-          name: data.user.name,
-          email: data.user.email,
-        })
-        // Navigate to dashboard
-        window.location.href = '/'
-      }
-    } catch {
-      setError('An error occurred. Please try again.')
-    } finally {
+    if (result?.error) {
+      setError('Invalid email or password')
       setLoading(false)
+    } else {
+      router.replace('/')
     }
   }
 
