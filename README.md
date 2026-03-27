@@ -1,4 +1,4 @@
-# RISA Claims Dashboard
+# RISA Claims Dashboard Demo
 
 A healthcare claims management platform built for revenue cycle teams. Track, manage, and process insurance claims from submission through final resolution — with built-in denial analysis, team assignment workflows, and multi-payer support.
 
