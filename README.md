@@ -54,8 +54,8 @@ RISA Claims Dashboard gives claims management teams a centralized workspace to:
 | Styling | Tailwind CSS, Radix UI |
 | Auth | NextAuth.js v4 (credentials + JWT) |
 | ORM | Prisma 5 |
-| Database | PostgreSQL |
-| Deployment | Docker, Render |
+| Database | PostgreSQL (Neon) |
+| Deployment | Docker, Google Cloud Run + Firebase Hosting |
 
 ---
 
@@ -146,12 +146,30 @@ npm run db:seed      # Re-seed the database
 
 ---
 
+## Live Demo
+
+**https://risa-claims-demo.web.app**
+
+| Field | Value |
+|---|---|
+| Email | `john@risalabs.ai` |
+| Password | `risa@2026` |
+
+---
+
 ## Deployment
 
-The project includes configuration for:
+The app is deployed on Google Cloud using:
 
-- **Docker** — `Dockerfile` for containerized deployment
-- **Render** — `render.yaml` for one-click Render deployment with PostgreSQL
+- **Docker** — `Dockerfile` for containerized builds
+- **Google Artifact Registry** — Docker image storage
+- **Google Cloud Run** — Serverless container hosting
+- **Firebase Hosting** — CDN frontend with Cloud Run rewrite
+- **Neon** — Serverless PostgreSQL database
+- **Google Secret Manager** — Secrets management (`DATABASE_URL`, `NEXTAUTH_SECRET`)
+- **GitHub Actions** — CI/CD pipeline (`.github/workflows/deploy.yml`)
+
+Every push to `main` automatically builds, pushes, and deploys the app.
 
 ---
 
