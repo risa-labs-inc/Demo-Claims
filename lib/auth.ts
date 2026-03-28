@@ -11,7 +11,7 @@ export const authOptions: NextAuthOptions = {
   },
   cookies: {
     sessionToken: {
-      name: 'next-auth.session-token',
+      name: '__session',
       options: {
         httpOnly: true,
         sameSite: 'lax',
