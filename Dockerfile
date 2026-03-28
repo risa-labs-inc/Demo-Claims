@@ -7,15 +7,12 @@ WORKDIR /app
 # Install dependencies
 RUN apk add --no-cache libc6-compat openssl python3 make g++
 
-# Copy package files and install dependencies
+# Copy package files and prisma schema (needed for postinstall prisma generate)
 COPY package.json package-lock.json* ./
-RUN npm ci
-
-# Copy prisma schema
 COPY prisma/schema.prisma ./prisma/
 
-# Generate Prisma client
-RUN npx prisma generate
+# Install dependencies (postinstall runs prisma generate)
+RUN npm ci
 
 # Copy all source files
 COPY . .
