@@ -57,50 +57,7 @@ RISA Claims Dashboard gives claims management teams a centralized workspace to:
 | Database | PostgreSQL (Neon) |
 | Deployment | Docker, Google Cloud Run + Firebase Hosting |
 
----
 
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18+
-- PostgreSQL database
-- npm or yarn
-
-### Installation
-
-```bash
-git clone https://github.com/risa-labs-inc/Demo-Claims.git
-cd Demo-Claims
-npm install
-```
-
-### Environment Setup
-
-Create a `.env` file in the root directory:
-
-```env
-DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE"
-NEXTAUTH_SECRET="your-secret-here"
-NEXTAUTH_URL="http://localhost:3000"
-```
-
-### Database Setup
-
-```bash
-npm run db:generate   # Generate Prisma client
-npm run db:push       # Push schema to database
-npm run db:seed       # Seed with sample data
-```
-
-### Run the App
-
-```bash
-npm run dev
-```
-
-
----
 
 ## Demo Credentials
 
