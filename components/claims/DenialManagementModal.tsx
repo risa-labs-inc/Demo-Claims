@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { ChevronRight, ChevronDown } from 'lucide-react'
+import { ChevronRight, ChevronDown, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ClaimWithAssignee } from '@/lib/types'
 import { formatDate, formatCurrency } from '@/lib/utils'
@@ -17,6 +17,8 @@ interface RuleResult {
   status: 'PASSED' | 'FAILED' | 'WARNING' | 'MANUAL' | 'SKIPPED'
   explanation: string
   data_used: Record<string, unknown>
+  section_header?: string
+  sources?: string[]
 }
 
 interface ActionPlan {
@@ -94,11 +96,9 @@ function RuleRow({ result }: { result: RuleResult }) {
 
       {open && (
         <div className="pb-3 px-1 space-y-2">
-          <p className="text-xs text-gray-500">
-            <span className="font-medium text-gray-600">Question: </span>
-            {result.decision_question}
-          </p>
-          <p className="text-xs text-gray-700">{result.explanation}</p>
+          <div className="border-l-2 border-gray-200 pl-3 py-0.5">
+            <p className="text-xs text-gray-600 leading-relaxed">{result.explanation}</p>
+          </div>
 
           {Object.keys(result.data_used ?? {}).length > 0 && (
             <div className="bg-gray-50 rounded p-2 mt-1">
@@ -111,6 +111,38 @@ function RuleRow({ result }: { result: RuleResult }) {
                   </span>
                 </div>
               ))}
+            </div>
+          )}
+
+          {result.sources && result.sources.length > 0 && (
+            <div className="mt-2">
+              <div className="text-xs font-medium text-gray-500 mb-1.5">Source</div>
+              <div className="flex flex-wrap gap-1.5">
+                {result.sources.map((src) => {
+                  const SOURCE_URLS: Record<string, string> = {
+                    'OncoEMR': 'https://www.oncoemr.com',
+                    'Availity API': 'https://www.availity.com',
+                    'Optum API': 'https://www.optum.com',
+                    'Candid PMS': 'https://www.candidhealth.com',
+                    'CMS NCCI': 'https://www.cms.gov/medicare/coding-billing/national-correct-coding-initiative-ncci-edits',
+                    'CMS MUE': 'https://www.cms.gov/medicare/coding-billing/national-correct-coding-initiative-ncci-edits/medicare-ncci-policy-manual',
+                    'AMA CPT': 'https://www.ama-assn.org/practice-management/cpt',
+                  }
+                  const url = SOURCE_URLS[src]
+                  return (
+                    <a
+                      key={src}
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100 hover:bg-blue-100 transition-colors"
+                    >
+                      {src}
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                    </a>
+                  )
+                })}
+              </div>
             </div>
           )}
         </div>
@@ -537,31 +569,61 @@ function AutomatedAnalysis({
           ))}
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1">
           {activeTab === 0 && (
-            <div className="divide-y divide-gray-100">
+            <div>
               {(ruleResults ?? []).map((r, i) => (
-                <RuleRow key={i} result={r} />
+                <div key={i}>
+                  {r.section_header && (
+                    <div className={`px-1 pb-1.5 ${i === 0 ? 'pt-0' : 'pt-5'}`}>
+                      <span className="text-xs font-semibold text-gray-400 tracking-wider uppercase">
+                        {r.section_header}
+                      </span>
+                    </div>
+                  )}
+                  <RuleRow result={r} />
+                </div>
               ))}
             </div>
           )}
           {activeTab === 1 && actionPlan && (
             <div className="space-y-4">
               <div className="bg-green-50 border border-green-100 rounded-lg p-4">
-                <div className="text-sm font-semibold text-gray-800 mb-2">Recommended Action</div>
-                <p className="text-sm text-gray-700 mb-3">{actionPlan.recommended_action}</p>
-                <ul className="space-y-1">
-                  {Object.entries(actionPlan.flags ?? {}).map(([key, val]) => (
-                    <li key={key} className="flex items-center gap-2 text-sm">
-                      <span className="w-1.5 h-1.5 rounded-full bg-gray-500 shrink-0" />
-                      <span>
-                        <span className="font-medium text-gray-800">{key}</span>
-                        {' = '}
-                        <span className="text-gray-700">{val}</span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <div className="text-sm font-semibold text-gray-800 mb-3">Recommended Action</div>
+                {(() => {
+                  const text = actionPlan.recommended_action
+                  const parts = text.split(/\s*\(\d+\)\s*/)
+                  const intro = parts[0]?.trim()
+                  const steps = parts.slice(1).filter(Boolean)
+                  return (
+                    <div className="space-y-3">
+                      {intro && <p className="text-sm text-gray-600">{intro}</p>}
+                      {steps.length > 0 && (
+                        <ol className="space-y-2">
+                          {steps.map((step, i) => (
+                            <li key={i} className="flex gap-2.5 text-sm text-gray-700">
+                              <span className="shrink-0 w-5 h-5 rounded-full bg-green-200 text-green-800 text-xs font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
+                              <span className="leading-relaxed">{step.trim().replace(/\.$/, '')}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                    </div>
+                  )
+                })()}
+                {Object.keys(actionPlan.flags ?? {}).length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-green-100 space-y-1">
+                    {Object.entries(actionPlan.flags ?? {}).map(([key, val]) => (
+                      <div key={key} className="flex items-start gap-2 text-xs">
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400 shrink-0 mt-1.5" />
+                        <span>
+                          <span className="font-medium text-gray-700">{key}:</span>{' '}
+                          <span className="text-gray-600">{val}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {(actionPlan.documents_collected?.length ?? 0) > 0 && (
@@ -813,7 +875,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
       if (c === 'CO-50') return 'Medical Necessity Denial'
       return 'Eligibility Denial'
     })(),
-    diagnosis_codes: ['C0882', 'M1000', 'Z7989'],
+    diagnosis_codes: ['C34.12', 'C50.911', 'Z51.11'],
   }
 
   const claimNumber = activeTab === 'primary'
@@ -952,6 +1014,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               dateOfService: dos,
               lineItemsDenied: claim.deniedLineItems ?? '',
             },
+            sources: ['Availity API', 'Candid PMS'],
           },
           {
             rule_name: 'Date of Service Coverage Verification',
@@ -966,6 +1029,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               dateOfService: dos,
               policyStatus: 'Terminated',
             },
+            sources: ['Availity API'],
           },
           {
             rule_name: 'Retro-Eligibility Check',
@@ -979,6 +1043,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               retroWindowDays: '60',
               retroReinstatementPossible: 'Yes — within retro window',
             },
+            sources: ['Availity API', 'Candid PMS'],
           },
           {
             rule_name: 'Patient-Policy Link Validation',
@@ -991,6 +1056,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               dobOnFile: formatDate(claim.dateOfBirth),
               demographicMatch: 'Confirmed',
             },
+            sources: ['Availity API', 'Candid PMS'],
           },
           {
             rule_name: 'Service Coverage Analysis',
@@ -1003,6 +1069,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               exclusionFound: 'No',
               priorAuthRequired: 'No',
             },
+            sources: ['Availity API'],
           },
           {
             rule_name: 'Billing Payer Validation',
@@ -1014,6 +1081,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               payerOnFile: payer,
               routingCorrect: 'Yes',
             },
+            sources: ['Candid PMS'],
           },
           {
             rule_name: 'Medicare Plan Check',
@@ -1025,6 +1093,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               mspApplicable: 'No',
               cobWithMedicare: 'Not applicable',
             },
+            sources: ['Availity API'],
           },
           {
             rule_name: 'Patient Grace Period Check',
@@ -1038,6 +1107,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               typicalGracePeriod: '30 days',
               gracePeriodConfirmed: 'Pending — needs payer verification',
             },
+            sources: ['Availity API', 'Candid PMS'],
           },
         ] as RuleResult[],
         plan: {
@@ -1075,6 +1145,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               memberId,
               dateOfService: dos,
             },
+            sources: ['Availity API', 'Candid PMS'],
           },
           {
             rule_name: 'Date of Service Coverage Verification',
@@ -1089,6 +1160,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               dateOfService: dos,
               possibleCause: 'Plan change during open enrollment period',
             },
+            sources: ['Availity API'],
           },
           {
             rule_name: 'Retro-Eligibility Check',
@@ -1100,6 +1172,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               action: 'Contact patient for updated insurance information',
               alternateCarrierOnFile: 'Unknown',
             },
+            sources: ['Availity API'],
           },
           {
             rule_name: 'Patient-Policy Link Validation',
@@ -1113,6 +1186,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               dobSearch: formatDate(claim.dateOfBirth),
               alternativePlanFound: 'No',
             },
+            sources: ['Availity API', 'Candid PMS'],
           },
           {
             rule_name: 'Service Coverage Analysis',
@@ -1122,6 +1196,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             data_used: {
               reason: 'Eligibility not confirmed; coverage analysis deferred',
             },
+            sources: ['Availity API'],
           },
           {
             rule_name: 'Billing Payer Validation',
@@ -1133,6 +1208,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               enrollmentStatus: 'Not active in submitted payer system',
               possibleNewPayer: 'Unknown — requires patient confirmation',
             },
+            sources: ['Candid PMS'],
           },
           {
             rule_name: 'Medicare Plan Check',
@@ -1145,6 +1221,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               medicareEnrollmentVerified: 'Not yet checked',
               recommendedAction: 'Check HETS for Medicare enrollment',
             },
+            sources: ['Availity API'],
           },
           {
             rule_name: 'Patient Grace Period Check',
@@ -1154,6 +1231,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             data_used: {
               reason: 'CO-28 (never active) — grace period not applicable',
             },
+            sources: ['Availity API'],
           },
         ] as RuleResult[],
         plan: {
@@ -1187,6 +1265,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             status: 'PASSED' as const,
             explanation: `CARC code CO-97 confirms a bundling denial. ${payer} determined that CPT ${claim.deniedLineItems} is included in the payment for another service billed on the same date (${dos}). Payer adjudicated and paid ${paidAmt} for ${paidCpts} but denied the E&M as bundled per National Correct Coding Initiative (NCCI) edits.`,
             data_used: { denialCode: 'CO-97', denialCategory: 'Billing / Bundling Denial', paidCPTs: paidCpts, deniedCPTs: claim.deniedLineItems ?? '', paidAmount: paidAmt },
+            sources: ['Availity API', 'CMS NCCI'],
           },
           {
             rule_name: 'Modifier 25 Check',
@@ -1194,6 +1273,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             status: 'FAILED' as const,
             explanation: `CPT ${claim.deniedLineItems} was submitted without modifier 25. Per NCCI policy, when an E&M service is billed on the same day as a procedure or infusion, modifier 25 ("Significant, separately identifiable evaluation and management service by the same physician on the day of a procedure") must be appended to the E&M code. Without modifier 25, ${payer}'s system automatically bundles the E&M into the infusion payment.`,
             data_used: { missingModifier: '25', requiredBy: 'NCCI Bundling Edits', deniedCPT: claim.deniedLineItems ?? '', bundledWith: paidCpts },
+            sources: ['CMS NCCI', 'Availity API'],
           },
           {
             rule_name: 'NCCI Edit Validation',
@@ -1201,6 +1281,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             status: 'PASSED' as const,
             explanation: `NCCI Column 1/Column 2 edits confirm that CPT ${claim.deniedLineItems} is bundled with infusion administration codes. However, the edit has a modifier indicator of "1," meaning the bundle CAN be bypassed with the correct modifier (modifier 25). The denial is correctable by resubmitting with modifier 25 appended to ${claim.deniedLineItems}.`,
             data_used: { ncciEditStatus: 'Bundled — modifier 25 bypass available', modifierIndicator: '1', correctionPath: `Resubmit ${claim.deniedLineItems}-25` },
+            sources: ['CMS NCCI'],
           },
           {
             rule_name: 'Clinical Documentation Review',
@@ -1208,6 +1289,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             status: 'MANUAL' as const,
             explanation: `To support the modifier 25 claim on appeal, clinical documentation must show that the E&M (${claim.deniedLineItems}) addressed a problem or clinical decision beyond the infusion administration itself. Review the progress note for ${dos} to confirm a separately identifiable chief complaint, history, exam, and medical decision-making distinct from infusion management.`,
             data_used: { documentationRequired: 'Progress note demonstrating separate medical decision-making', dateOfService: dos, cptUnderReview: claim.deniedLineItems ?? '' },
+            sources: ['OncoEMR'],
           },
           {
             rule_name: 'Resubmission Eligibility Check',
@@ -1215,6 +1297,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             status: 'WARNING' as const,
             explanation: `${payer} generally allows corrected claim resubmission within 365 days of the DOS. DOS is ${dos}. Verify the exact corrected claim deadline in the ${payer} provider contract to ensure the resubmission will be accepted. Act promptly to avoid timely filing denial.`,
             data_used: { dateOfService: dos, typicalCorrectedClaimWindow: '365 days from DOS', action: `Resubmit ${claim.deniedLineItems}-25 with updated modifier` },
+            sources: ['Candid PMS', 'Availity API'],
           },
         ] as RuleResult[],
         plan: {
@@ -1251,6 +1334,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             status: 'PASSED' as const,
             explanation: `CARC code CO-50 confirms a medical necessity denial. ${payer} paid ${paidAmt} for ${paidCpts} but determined that ${deniedCpts} were not medically necessary for this patient on ${dos}. The payer's clinical criteria were not met for the additional infusion duration and drug regimen.`,
             data_used: { denialCode: 'CO-50', denialCategory: 'Medical Necessity Denial', paidCPTs: paidCpts, deniedCPTs: deniedCpts, paidAmount: paidAmt },
+            sources: ['Availity API', 'Candid PMS'],
           },
           {
             rule_name: 'Prior Authorization Verification',
@@ -1258,6 +1342,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             status: 'FAILED' as const,
             explanation: `${payer} records show no prior authorization on file for ${deniedCpts} on DOS ${dos}. Per ${payer}'s clinical policy, extended infusion durations beyond the initial hour and the specific drug regimen require pre-authorization. Services were rendered without authorization, triggering the CO-50 denial.`,
             data_used: { priorAuthOnFile: 'No', deniedServices: deniedCpts, policyRequirement: `${payer} clinical criteria — PA required for extended infusion and drug`, dateOfService: dos },
+            sources: ['Optum API', 'Availity API'],
           },
           {
             rule_name: 'Clinical Criteria Assessment',
@@ -1265,6 +1350,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             status: 'MANUAL' as const,
             explanation: `Manual review required. Pull the treating physician's order, oncology treatment plan, and progress notes for ${dos}. Confirm the clinical rationale for the extended infusion duration and drug selection. Evidence of active oncological diagnosis, prior treatment response, and physician-documented medical necessity will be required for appeal.`,
             data_used: { reviewRequired: 'Yes — clinical notes and treatment plan', deniedServices: deniedCpts, appealEvidence: 'Physician order, diagnosis confirmation, treatment protocol' },
+            sources: ['OncoEMR'],
           },
           {
             rule_name: 'LCD / Coverage Policy Review',
@@ -1272,6 +1358,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             status: 'WARNING' as const,
             explanation: `${payer} may apply a Local Coverage Determination (LCD) or internal clinical policy for infusion drug coverage. Verify that the patient's diagnosis codes support coverage of ${deniedCpts} under the applicable LCD. If the LCD supports coverage, include the LCD reference in the appeal.`,
             data_used: { lcdReviewRequired: 'Yes', deniedServices: deniedCpts, diagnosisCodes: '(see claim)', action: 'Pull applicable LCD and confirm diagnosis-to-drug coverage match' },
+            sources: ['Availity API', 'CMS NCCI'],
           },
           {
             rule_name: 'Retrospective Authorization Request',
@@ -1279,6 +1366,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             status: 'WARNING' as const,
             explanation: `${payer} may allow a retrospective authorization request within 30–60 days of the service date when the treating physician certifies medical necessity. Contact ${payer}'s UM (Utilization Management) department to determine if a retro auth is available for ${deniedCpts} on ${dos}. Approval would allow resubmission of the denied line items.`,
             data_used: { retroAuthPossible: 'Pending — contact UM department', deniedServices: deniedCpts, dateOfService: dos, typicalWindow: '30–60 days from DOS' },
+            sources: ['Optum API', 'Availity API'],
           },
         ] as RuleResult[],
         plan: {
@@ -1304,7 +1392,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
     }
 
     // CO-22 — Medicare paid as primary; BCBS (secondary) denied because Medicare EOB not attached
-    {
+    if (code === 'CO-22') {
       const isMedicarePrimary = claim.primaryInsurance?.toLowerCase().includes('medicare')
       const medicareMemberId = isMedicarePrimary ? claim.primaryMemberId : (claim.secondaryMemberId ?? '')
       const commercialPayer = isMedicarePrimary ? (claim.secondaryInsurance ?? payer) : claim.primaryInsurance
@@ -1332,6 +1420,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               submittedTo: commercialPayer,
               missingDocument: 'Medicare Explanation of Benefits (EOMB)',
             },
+            sources: ['Availity API', 'Candid PMS'],
           },
           {
             rule_name: 'Primary Claim Adjudication Status',
@@ -1346,6 +1435,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               medicarePaymentDate,
               primaryAdjudicationStatus: 'PAID',
             },
+            sources: ['Availity API'],
           },
           {
             rule_name: 'Date of Service Coverage Verification',
@@ -1358,6 +1448,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               dateOfService: dos,
               dualCoverageConfirmed: 'Yes',
             },
+            sources: ['Availity API'],
           },
           {
             rule_name: 'Patient-Policy Link Validation',
@@ -1371,6 +1462,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               secondaryMemberId: commercialMemberId,
               demographicMatch: 'Confirmed on both plans',
             },
+            sources: ['Availity API', 'Candid PMS'],
           },
           {
             rule_name: 'Primary EOB Attachment Verification',
@@ -1384,6 +1476,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               requiredBy: `${commercialPayer} COB policy / CMS secondary billing guidelines`,
               correctionRequired: `Resubmit with Medicare EOMB (${medicareCheckNum}) attached`,
             },
+            sources: ['Candid PMS', 'Availity API'],
           },
           {
             rule_name: 'Secondary Claim Submission Validation',
@@ -1396,6 +1489,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               medicarePaidAmountSubmitted: 'Not submitted',
               correctionRequired: 'Resubmit 837P with Loop 2320 COB data populated from Medicare EOMB',
             },
+            sources: ['Candid PMS', 'Availity API'],
           },
           {
             rule_name: 'Service Coverage Analysis',
@@ -1408,6 +1502,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               secondaryCoverage: `Covered — ${commercialPayer} will process after EOMB`,
               estimatedCrossoverBalance: remainingBalance,
             },
+            sources: ['Availity API'],
           },
           {
             rule_name: 'Timely Filing Check',
@@ -1420,6 +1515,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               correctedClaimDeadline: 'Verify with payer contract — act promptly',
               risk: 'Denial for timely filing if resubmission is delayed',
             },
+            sources: ['Candid PMS', 'Availity API'],
           },
         ] as RuleResult[],
         plan: {
@@ -1442,6 +1538,462 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
         } as ActionPlan,
       }
     }
+
+    if (code === 'CO-4') {
+      // Modifier mismatch — wrong modifier appended to E&M code billed same-day as infusion
+      const deniedCpts = claim.deniedLineItems ?? '99213, 96413, 96415'
+      const emCode = deniedCpts.split(',')[0].trim()
+      return {
+        rules: [
+          {
+            section_header: 'Bundling & Unbundling',
+            rule_name: 'CPT Bundling Check (NCCI Edit Validation)',
+            decision_question: 'Are any of the billed CPT codes bundled under NCCI edits?',
+            status: 'FAILED' as const,
+            explanation: `NCCI edit table confirms that CPT ${emCode} (E&M) and the infusion codes are component codes when billed together on the same date without an appropriate modifier. ${payer}'s adjudication engine applied a bundling edit to the E&M line item. Because modifier -57 does not override NCCI bundling edits for same-day E&M and infusion, the E&M was denied under CO-4.`,
+            data_used: {
+              cptPair: deniedCpts,
+              ncciEditIndicator: '1 — bundled, modifier may override',
+              modifierPresent: 'Yes — modifier 57 (incorrect)',
+              editSource: 'CMS NCCI Table, Q1 2026',
+              lineItemAffected: emCode,
+            },
+            sources: ['CMS NCCI', 'Availity API'],
+          },
+          {
+            rule_name: 'Modifier Justification (Distinct Service Evidence)',
+            decision_question: 'Is the modifier billed valid and appropriate to override the NCCI bundling edit?',
+            status: 'FAILED' as const,
+            explanation: `Modifier -57 ("Decision for Surgery") was appended to CPT ${emCode}, but modifier -57 is reserved for E&M visits that result in the decision to perform a major surgical procedure within 24 hours. It does not override NCCI bundling edits for same-day E&M and infusion billing. Modifier -25 is the correct modifier to indicate a significant, separately identifiable E&M service on the same day as a procedure or infusion. CO-4 was triggered because the modifier is inconsistent with the billed service.`,
+            data_used: {
+              modifierOnClaim: '-57 (Decision for Surgery)',
+              modifierRequired: '-25 (Significant, separately identifiable E&M)',
+              ncciCompatibility: 'Modifier -57 does not bypass NCCI infusion bundle',
+              procedureNoteEvidence: 'Documentation of separate E&M exists — wrong modifier applied',
+              source: 'CMS NCCI Tables, CPT Manual 2026',
+            },
+            sources: ['OncoEMR', 'CMS NCCI'],
+          },
+          {
+            rule_name: 'Distinct Service Evidence Check',
+            decision_question: 'Is there sufficient clinical documentation to support separate billing of the E&M and infusion services?',
+            status: 'WARNING' as const,
+            explanation: `${payer} progress note dated ${dos} documents a separately necessary evaluation prior to initiating infusion. The clinical basis for a distinct E&M service is present. However, because modifier -57 was used instead of modifier -25, the payer's adjudication engine rejected the modifier override. The documentation is adequate for appeal — the corrected claim must substitute modifier -25 for -57 on CPT ${emCode}.`,
+            data_used: {
+              progressNoteDate: dos,
+              emDocumented: 'Yes',
+              infusionDocumented: 'Yes',
+              separateEncounterEvidence: 'Yes — supports distinct E&M service',
+              ncciEditIndicator: 'Modifier-dependent (requires -25, not -57)',
+            },
+            sources: ['OncoEMR', 'CMS NCCI'],
+          },
+          {
+            section_header: 'Medical Necessity',
+            rule_name: 'Dx / CPT Medical Necessity Validation',
+            decision_question: 'Do the diagnosis codes support medical necessity for the billed CPT codes?',
+            status: 'PASSED' as const,
+            explanation: `Primary diagnosis supports medical necessity for CPT codes ${deniedCpts} under the applicable LCD for chemotherapy services. Payer policy does not require prior authorization for these CPT-diagnosis combinations. The denial is solely due to the incorrect modifier, not a medical necessity issue.`,
+            data_used: {
+              primaryDiagnosis: claim.deniedLineItems ?? 'see claim',
+              lcdId: 'L33794 — Chemotherapy Administration',
+              medicalNecessityMet: 'Yes',
+              priorAuthRequired: 'No',
+              policySource: `${payer} Oncology Clinical Policy`,
+            },
+            sources: ['Availity API', 'OncoEMR'],
+          },
+          {
+            rule_name: 'ICD-CPT Mapping Alignment',
+            decision_question: 'Do the ICD-10 codes map correctly to the billed CPT codes?',
+            status: 'PASSED' as const,
+            explanation: `ICD-10 diagnosis code maps appropriately to CPT codes ${deniedCpts} for chemotherapy infusion. ICD specificity is at the highest level available. No crosswalk mismatch detected between diagnosis and procedure.`,
+            data_used: {
+              cptCodes: deniedCpts,
+              mappingStatus: 'Valid — confirmed via payer crosswalk',
+              icdSpecificity: '7th character — highest specificity',
+            },
+            sources: ['Availity API', 'OncoEMR'],
+          },
+          {
+            rule_name: 'LCD / NCD Coverage Check',
+            decision_question: 'Are the billed CPT codes covered under the applicable LCD or NCD for this payer?',
+            status: 'PASSED' as const,
+            explanation: `LCD L33794 confirms coverage for intravenous chemotherapy administration for patients with a confirmed malignant neoplasm diagnosis. All billed CPT codes are within covered service scope. No LCD conflicts identified. The denial is attributable to the modifier error, not a coverage gap.`,
+            data_used: {
+              lcdId: 'L33794',
+              ncdApplicable: 'No',
+              coveredCpts: deniedCpts,
+              diagnosisCovered: 'Yes',
+              source: `CMS / ${payer} Payer Portal`,
+            },
+            sources: ['Availity API', 'OncoEMR'],
+          },
+          {
+            section_header: 'CPT & Modifier Validity',
+            rule_name: 'CPT Validity for Date of Service',
+            decision_question: 'Are all billed CPT codes valid for the date of service, patient age, and provider specialty?',
+            status: 'PASSED' as const,
+            explanation: `CPT codes ${deniedCpts} are all valid for DOS ${dos} under the current CPT code set. No age or gender restrictions apply. The rendering provider's specialty is consistent with billing authority for all codes.`,
+            data_used: {
+              cptCodes: deniedCpts,
+              dosValidity: `Valid for ${dos}`,
+              ageGenderRule: 'No restriction',
+              providerSpecialty: 'Medical Oncology — consistent',
+              cptSource: 'AMA CPT 2026',
+            },
+            sources: ['AMA CPT', 'Availity API'],
+          },
+          {
+            rule_name: 'Modifier Validity (CPT Compatibility)',
+            decision_question: 'Are the modifiers used on this claim valid and compatible with the billed CPT codes?',
+            status: 'FAILED' as const,
+            explanation: `Modifier -57 was appended to CPT ${emCode} on this claim. While modifier -57 is a valid CPT modifier, it is not compatible with same-day E&M and infusion billing. Per CMS guidelines and the CPT Manual, modifier -57 is applicable when an E&M service results in the decision to perform a major surgical procedure (global period applies). It does not satisfy the NCCI bundling edit between E&M and infusion services — only modifier -25 can override that edit. Resubmission requires replacing modifier -57 with modifier -25 on CPT ${emCode}.`,
+            data_used: {
+              modifiersOnClaim: '-57 on ' + emCode,
+              modifierRequired: '-25 on ' + emCode,
+              ncciCompatibility: 'Modifier -57 invalid for infusion same-day E&M',
+              clinicalJustification: 'Available in documentation — modifier correction needed',
+              source: 'CMS NCCI Tables, CPT Manual 2026',
+            },
+            sources: ['CMS NCCI', 'AMA CPT'],
+          },
+          {
+            rule_name: 'Downcoding / Upcoding Validation',
+            decision_question: 'Was any downcoding or upcoding applied by the payer, and is it clinically justified?',
+            status: 'PASSED' as const,
+            explanation: `EOB reflects denial rather than a level-of-service adjustment. No downcoding of ${emCode} to a lower E&M level was applied. The denial is solely attributable to the modifier incompatibility, not a CPT level dispute. No upcoding concern identified on provider side.`,
+            data_used: {
+              billedCpt: emCode,
+              paidCpt: 'Denied — not downgraded',
+              denialReason: 'Modifier incompatibility, not level dispute',
+              upcodingFlagged: 'No',
+              source: 'EOB, Payer Portal',
+            },
+            sources: ['Availity API', 'Candid PMS'],
+          },
+          {
+            section_header: 'Units & POS',
+            rule_name: 'Units Accuracy (MUE Check)',
+            decision_question: 'Do the units billed for each CPT code comply with the CMS Medically Unlikely Edit (MUE) limits?',
+            status: 'PASSED' as const,
+            explanation: `All CPT codes on this claim are billed within CMS MUE limits. Infusion time log confirms total infusion time is consistent with units billed. No MUE violations identified.`,
+            data_used: {
+              cptUnits: '1 unit each — within MUE limits',
+              infusionTimeDocumented: 'Yes — consistent with billed units',
+              mueCompliance: 'Yes',
+              source: 'CMS MUE Table, Q1 2026',
+            },
+            sources: ['CMS MUE', 'OncoEMR'],
+          },
+          {
+            rule_name: 'Place of Service (POS) Validation',
+            decision_question: 'Is the place of service code on the claim consistent with the actual location of service?',
+            status: 'PASSED' as const,
+            explanation: `POS code 11 (Office) is reported on the claim. Service was rendered at the oncology clinic office location. POS is correct and consistent with payer contract terms for outpatient infusion billing.`,
+            data_used: {
+              posCodeBilled: '11 — Office',
+              actualLocation: 'Oncology clinic — confirmed',
+              posMatch: 'Confirmed',
+              payerContractPos: '11 — consistent',
+            },
+            sources: ['Candid PMS', 'Availity API'],
+          },
+          {
+            section_header: 'Claim Integrity',
+            rule_name: 'True Duplicate Claim Check',
+            decision_question: 'Is this denial the result of a duplicate claim submission?',
+            status: 'PASSED' as const,
+            explanation: `PMS confirms this is the original claim submission. No prior claim with the same member ID, DOS, and CPT code combination was found in ${payer}'s system. The denial is not a duplicate rejection — it is a first-pass adjudication denial due to the modifier incompatibility.`,
+            data_used: {
+              originalClaimNumber: claim.claimNumber ?? claim.claimId,
+              duplicateFound: 'No',
+              serviceLineMatch: 'No prior matching claim',
+              billedAmount: formatCurrency(Number(claim.chargeAmount)),
+            },
+            sources: ['Candid PMS', 'Availity API'],
+          },
+          {
+            rule_name: 'Timely Filing Validation',
+            decision_question: 'Was the claim submitted within the payer\'s timely filing window?',
+            status: 'PASSED' as const,
+            explanation: `DOS was ${dos}. Claim was submitted ${formatDate(claim.claimReceivedDate!)}, ${Math.floor((new Date(claim.claimReceivedDate!).getTime() - new Date(claim.dateOfService).getTime()) / 86400000)} days after the date of service. ${payer}'s timely filing limit for in-network providers is 90 days from DOS. Submission is well within the filing window. Corrected claim resubmission with modifier -25 must also be filed within this window.`,
+            data_used: {
+              dateOfService: dos,
+              submissionDate: formatDate(claim.claimReceivedDate!),
+              daysSinceService: `${Math.floor((new Date(claim.claimReceivedDate!).getTime() - new Date(claim.dateOfService).getTime()) / 86400000)} days`,
+              filingDeadline: '90 days (in-network)',
+              timelyFilingMet: 'Yes',
+            },
+            sources: ['Candid PMS', 'Availity API'],
+          },
+          {
+            rule_name: 'DOS & Diagnosis Code Verification',
+            decision_question: 'Are the date of service and diagnosis codes consistent across claim, EMR, and PMS records?',
+            status: 'PASSED' as const,
+            explanation: `DOS ${dos} and primary diagnosis C34.12 are consistent across the claim, OncoEMR encounter record, and Candid PMS. No discrepancy in DOS or ICD coding was identified. All secondary diagnoses are also correctly carried over. The only correctable issue is the modifier -57 on CPT ${emCode}, which should be changed to modifier -25.`,
+            data_used: {
+              dosOnClaim: dos,
+              dosInEmr: `${dos} — match`,
+              primaryDxClaim: 'C34.12',
+              primaryDxEmr: 'C34.12 — match',
+              secondaryDx: 'Z79.899, Z23 — consistent',
+              source: 'Candid PMS, OncoEMR',
+            },
+            sources: ['Candid PMS', 'OncoEMR'],
+          },
+        ] as RuleResult[],
+        plan: {
+          recommended_action:
+            `CO-4 modifier mismatch denial — modifier -57 was appended to CPT ${emCode} instead of the correct modifier -25. ${payer} denied the claim because modifier -57 (Decision for Surgery) does not override NCCI bundling edits for same-day E&M and infusion billing. Recommended steps: (1) Pull the progress note for ${dos} and confirm documentation supports a separately identifiable E&M service beyond infusion management. (2) Resubmit a corrected claim replacing modifier -57 with modifier -25 on CPT ${emCode} (i.e., ${emCode}-25). (3) Attach the supporting clinical note to the corrected claim. (4) Confirm the corrected claim is submitted within ${payer}'s corrected claim timely filing window from DOS (${dos}).`,
+          flags: {
+            DeniedCPTs: deniedCpts,
+            IncorrectModifier: '-57 (Decision for Surgery)',
+            RequiredModifier: '-25 (Significant, separately identifiable E&M)',
+            NCCIBypassAvailable: 'Yes — modifier indicator 1 (requires -25)',
+            Action: `Resubmit corrected claim: ${emCode}-25 with clinical note`,
+            DocumentationStatus: 'Adequate — modifier correction is only fix needed',
+          },
+          documents_collected: [
+            'Original EOB with CO-4 denial',
+            `Progress note for ${dos} (supporting separate E&M)`,
+            'Corrected Claim (837P) with modifier -25 replacing modifier -57',
+            'NCCI Edit Reference confirming -25 modifier bypass',
+            `${payer} modifier policy reference`,
+          ],
+        } as ActionPlan,
+      }
+    }
+
+    if (code === 'CO-11') {
+      // Diagnosis inconsistent with procedure — Z79.899 does not support chemotherapy/J9355
+      const deniedCpts = claim.deniedLineItems ?? '96413, 96415, J9355'
+      return {
+        rules: [
+          {
+            section_header: 'Bundling & Unbundling',
+            rule_name: 'CPT Bundling Check (NCCI Edit Validation)',
+            decision_question: 'Are any of the billed CPT codes bundled under NCCI edits?',
+            status: 'PASSED' as const,
+            explanation: `No NCCI bundling edit conflicts identified. The billed CPT codes (${deniedCpts}) do not trigger any Column 1/Column 2 bundling rules. No E&M service was billed on the same day that would require a modifier override. The denial is not related to bundling.`,
+            data_used: {
+              cptCodes: deniedCpts,
+              ncciEditApplicable: 'No — no bundling conflict',
+              modifierRequired: 'N/A',
+              editSource: 'CMS NCCI Table, Q1 2026',
+            },
+            sources: ['CMS NCCI', 'Availity API'],
+          },
+          {
+            rule_name: 'Modifier Justification (Distinct Service Evidence)',
+            decision_question: 'Is a modifier required to override any bundling edit on this claim?',
+            status: 'PASSED' as const,
+            explanation: `No modifier is required to unbundle any CPT code on this claim. The denial (CO-11) is due to a diagnosis-procedure mismatch, not a bundling or modifier issue. No modifier justification action is needed.`,
+            data_used: {
+              modifierRequired: 'N/A — no bundling edit to override',
+              denialRootCause: 'Diagnosis inconsistent with procedure (CO-11)',
+            },
+            sources: ['OncoEMR', 'CMS NCCI'],
+          },
+          {
+            rule_name: 'Distinct Service Evidence Check',
+            decision_question: 'Is there documentation supporting the billed services as distinct and medically necessary?',
+            status: 'PASSED' as const,
+            explanation: `Progress notes confirm the infusion services (${deniedCpts}) were rendered as ordered. The clinical issue is not documentation of service delivery, but rather that the primary diagnosis on the claim (Z79.899) does not support the procedure codes billed. Correcting the diagnosis code is the required action.`,
+            data_used: {
+              serviceDocumented: 'Yes — infusion administration confirmed',
+              denialRootCause: 'Incorrect primary diagnosis code on claim',
+              correctionNeeded: 'Update primary diagnosis to active oncologic ICD-10 code',
+            },
+            sources: ['OncoEMR', 'CMS NCCI'],
+          },
+          {
+            section_header: 'Medical Necessity',
+            rule_name: 'Dx / CPT Medical Necessity Validation',
+            decision_question: 'Do the diagnosis codes support medical necessity for the billed CPT codes?',
+            status: 'FAILED' as const,
+            explanation: `Primary diagnosis Z79.899 ("Other long-term (current) drug therapy") does not establish an active oncologic condition requiring chemotherapy infusion (${deniedCpts}). ${payer}'s adjudication engine determined that Z79.899 is a status code — not a primary diagnosis — and does not independently support coverage of chemotherapy infusion or J9355 (trastuzumab/Herceptin). An active cancer diagnosis (e.g., C50.x for breast cancer) is required as the primary diagnosis to establish medical necessity.`,
+            data_used: {
+              primaryDiagnosis: 'Z79.899 — Other long-term drug therapy (status code only)',
+              diagnosisSupportsChemo: 'No — Z79.899 is a status/supplementary code',
+              requiredDiagnosis: 'Active oncologic ICD-10 (e.g., C50.x, C34.x)',
+              lcdRequirement: 'Primary active cancer dx required per LCD L34587',
+            },
+            sources: ['Availity API', 'OncoEMR'],
+          },
+          {
+            rule_name: 'ICD-CPT Mapping Alignment',
+            decision_question: 'Do the ICD-10 codes map correctly to the billed CPT codes?',
+            status: 'FAILED' as const,
+            explanation: `ICD-10 code Z79.899 does not crosswalk to CPT codes for chemotherapy infusion (96413, 96415) or J9355 (trastuzumab). Payer crosswalk tables confirm that Z79.899 is not an approved primary diagnosis for these chemotherapy procedure codes. The claim requires an active cancer diagnosis at the 4th–7th character specificity level. No valid crosswalk mapping detected between the submitted diagnosis and the billed procedures.`,
+            data_used: {
+              primaryIcd: 'Z79.899',
+              cptCodes: deniedCpts,
+              mappingStatus: 'Invalid — Z79.899 not a valid primary dx for chemotherapy CPTs',
+              icdSpecificity: 'Z79.899 is supplementary — lacks clinical specificity for oncology billing',
+              correctionRequired: 'Replace Z79.899 with specific active cancer ICD-10 code',
+            },
+            sources: ['Availity API', 'OncoEMR'],
+          },
+          {
+            rule_name: 'LCD / NCD Coverage Check',
+            decision_question: 'Are the billed CPT codes covered under the applicable LCD or NCD for this payer?',
+            status: 'FAILED' as const,
+            explanation: `LCD L34587 governs coverage of intravenous chemotherapy administration and trastuzumab (J9355) for ${payer}. This LCD requires a confirmed active malignant neoplasm diagnosis (e.g., C50.x for HER2+ breast cancer) as the primary diagnosis. The submitted diagnosis Z79.899 does not satisfy LCD L34587 coverage criteria. All three CPT codes (${deniedCpts}) are within covered service scope when paired with an appropriate cancer diagnosis — the coverage denial is solely due to the diagnosis mismatch.`,
+            data_used: {
+              lcdId: 'L34587',
+              lcdRequirement: 'Active malignant neoplasm as primary diagnosis',
+              submittedDiagnosis: 'Z79.899 — does not satisfy LCD criteria',
+              coveredCpts: deniedCpts,
+              source: `CMS / ${payer} Payer Portal`,
+            },
+            sources: ['Availity API', 'OncoEMR'],
+          },
+          {
+            section_header: 'CPT & Modifier Validity',
+            rule_name: 'CPT Validity for Date of Service',
+            decision_question: 'Are all billed CPT codes valid for the date of service, patient age, and provider specialty?',
+            status: 'PASSED' as const,
+            explanation: `CPT codes ${deniedCpts} are all valid for DOS ${dos} under the current CPT code set. No age or gender restrictions apply. The rendering provider's specialty (Medical Oncology) is consistent with billing authority for all codes. The denial is not related to CPT validity.`,
+            data_used: {
+              cptCodes: deniedCpts,
+              dosValidity: `Valid for ${dos}`,
+              ageGenderRule: 'No restriction',
+              providerSpecialty: 'Medical Oncology — consistent',
+              cptSource: 'AMA CPT 2026',
+            },
+            sources: ['AMA CPT', 'Availity API'],
+          },
+          {
+            rule_name: 'Modifier Validity (CPT Compatibility)',
+            decision_question: 'Are the modifiers used on this claim valid and compatible with the billed CPT codes?',
+            status: 'PASSED' as const,
+            explanation: `No modifiers are present on any line item. No modifiers are required for the CPT codes billed (${deniedCpts}) on this claim. Modifier validity is not a contributing factor to the CO-11 denial.`,
+            data_used: {
+              modifiersOnClaim: 'None',
+              modifierRequired: 'None for these CPTs',
+              ncciCompatibility: 'N/A — no modifier issue',
+              source: 'CMS NCCI Tables, CPT Manual 2026',
+            },
+            sources: ['CMS NCCI', 'AMA CPT'],
+          },
+          {
+            rule_name: 'Downcoding / Upcoding Validation',
+            decision_question: 'Was any downcoding or upcoding applied by the payer, and is it clinically justified?',
+            status: 'PASSED' as const,
+            explanation: `EOB reflects full denial rather than a level-of-service adjustment. No downcoding was applied by ${payer}. The denial is attributable entirely to the diagnosis-procedure mismatch (CO-11), not a CPT level dispute. No upcoding concern identified on the provider side.`,
+            data_used: {
+              billedCpts: deniedCpts,
+              paidCpts: 'All denied — not downgraded',
+              denialReason: 'Diagnosis inconsistent with procedure, not level dispute',
+              upcodingFlagged: 'No',
+              source: 'EOB, Payer Portal',
+            },
+            sources: ['Availity API', 'Candid PMS'],
+          },
+          {
+            section_header: 'Units & POS',
+            rule_name: 'Units Accuracy (MUE Check)',
+            decision_question: 'Do the units billed for each CPT code comply with the CMS Medically Unlikely Edit (MUE) limits?',
+            status: 'PASSED' as const,
+            explanation: `All CPT codes on this claim are billed within CMS MUE limits. Infusion time log confirms the infusion duration is consistent with billed units. No MUE violations identified. Units accuracy is not a contributing factor to the CO-11 denial.`,
+            data_used: {
+              cptUnits: '96413: 1 billed / MUE limit: 1 | 96415: 2 billed / MUE limit: 5',
+              infusionTimeDocumented: 'Yes — consistent with billed units',
+              mueCompliance: 'Yes',
+              source: 'CMS MUE Table, Q1 2026',
+            },
+            sources: ['CMS MUE', 'OncoEMR'],
+          },
+          {
+            rule_name: 'Place of Service (POS) Validation',
+            decision_question: 'Is the place of service code on the claim consistent with the actual location of service?',
+            status: 'PASSED' as const,
+            explanation: `POS code 11 (Office) is reported on the claim. Service was rendered at the oncology clinic office location. POS is correct and consistent with payer contract terms for outpatient infusion billing.`,
+            data_used: {
+              posCodeBilled: '11 — Office',
+              actualLocation: 'Oncology clinic — confirmed',
+              posMatch: 'Confirmed',
+              payerContractPos: '11 — consistent',
+            },
+            sources: ['Candid PMS', 'Availity API'],
+          },
+          {
+            section_header: 'Claim Integrity',
+            rule_name: 'True Duplicate Claim Check',
+            decision_question: 'Is this denial the result of a duplicate claim submission?',
+            status: 'PASSED' as const,
+            explanation: `PMS confirms this is the original claim submission. No prior claim with the same member ID, DOS, and CPT code combination was found in ${payer}'s system. The denial is not a duplicate rejection — it is a first-pass adjudication denial due to the diagnosis-procedure mismatch.`,
+            data_used: {
+              originalClaimNumber: claim.claimNumber ?? claim.claimId,
+              duplicateFound: 'No',
+              serviceLineMatch: 'No prior matching claim',
+              billedAmount: formatCurrency(Number(claim.chargeAmount)),
+            },
+            sources: ['Candid PMS', 'Availity API'],
+          },
+          {
+            rule_name: 'Timely Filing Validation',
+            decision_question: 'Was the claim submitted within the payer\'s timely filing window?',
+            status: 'PASSED' as const,
+            explanation: `DOS was ${dos}. Claim was submitted ${formatDate(claim.claimReceivedDate!)}, ${Math.floor((new Date(claim.claimReceivedDate!).getTime() - new Date(claim.dateOfService).getTime()) / 86400000)} days after the date of service. ${payer}'s timely filing limit for in-network providers is 365 days from DOS. Submission is well within the filing window. Corrected claim resubmission with the corrected diagnosis code must also be filed within this window.`,
+            data_used: {
+              dateOfService: dos,
+              submissionDate: formatDate(claim.claimReceivedDate!),
+              daysSinceService: `${Math.floor((new Date(claim.claimReceivedDate!).getTime() - new Date(claim.dateOfService).getTime()) / 86400000)} days`,
+              filingDeadline: '365 days (in-network)',
+              timelyFilingMet: 'Yes',
+            },
+            sources: ['Candid PMS', 'Availity API'],
+          },
+          {
+            rule_name: 'DOS & Diagnosis Code Verification',
+            decision_question: 'Are the date of service and diagnosis codes consistent across claim, EMR, and PMS records?',
+            status: 'FAILED' as const,
+            explanation: `DOS ${dos} is correctly reported and consistent across the claim and OncoEMR encounter record. However, the primary diagnosis code Z79.899 ("Other long-term drug therapy") is a supplementary/status code recorded in the EMR but was incorrectly placed as the first-listed diagnosis on the claim. Per ICD-10-CM coding guidelines, the active malignant neoplasm (e.g., C50.911 — HER2+ right breast cancer) must be the first-listed diagnosis for chemotherapy claims. Z79.899 may be listed as a secondary code. The Candid PMS record shows C50.911 as the active diagnosis — this was not correctly carried over to the claim.`,
+            data_used: {
+              dosOnClaim: dos,
+              dosInEmr: `${dos} — match`,
+              primaryDxClaim: 'Z79.899 — incorrect first-listed diagnosis',
+              primaryDxEmr: 'C50.911 — active malignant neoplasm (not carried over)',
+              secondaryDx: 'Z79.899 should be secondary only',
+              source: 'Candid PMS, OncoEMR',
+            },
+            sources: ['Candid PMS', 'OncoEMR'],
+          },
+        ] as RuleResult[],
+        plan: {
+          recommended_action:
+            `CO-11 diagnosis-procedure mismatch denial — primary diagnosis Z79.899 ("Other long-term drug therapy") does not support chemotherapy infusion (${deniedCpts}) per ${payer}'s LCD L34587. ${payer} requires an active malignant neoplasm as the primary diagnosis for coverage of chemotherapy CPTs and J9355 (trastuzumab). Recommended steps: (1) Pull the patient's active oncology treatment record and pathology report to identify the correct active cancer diagnosis code (e.g., C50.911 for HER2+ right breast cancer). (2) Correct the primary diagnosis on the claim — replace Z79.899 with the specific active cancer ICD-10 code at the highest available specificity (4th–7th character). (3) Resubmit the corrected claim to ${payer} with the updated diagnosis and all supporting clinical documentation. (4) If treatment records are incomplete, request a letter of medical necessity from the treating oncologist documenting the active cancer diagnosis and rationale for trastuzumab therapy. (5) Confirm the corrected claim is submitted within ${payer}'s timely filing window from the denial date.`,
+          flags: {
+            DeniedCPTs: deniedCpts,
+            SubmittedDiagnosis: 'Z79.899 — supplementary code (insufficient)',
+            RequiredDiagnosis: 'Active cancer ICD-10 (e.g., C50.911, C34.x)',
+            LCDApplicable: 'LCD L34587 — requires active malignant neoplasm',
+            Action: `Correct primary dx to active cancer code; resubmit to ${payer}`,
+            DocumentationNeeded: 'Pathology report, treatment plan, oncologist letter of necessity',
+          },
+          documents_collected: [
+            'Original EOB with CO-11 denial',
+            `Pathology report confirming active cancer diagnosis`,
+            'Oncology treatment plan / physician order for trastuzumab',
+            'Corrected Claim (837P) with updated primary ICD-10 diagnosis code',
+            `LCD L34587 coverage reference for ${payer}`,
+            'Letter of Medical Necessity from treating oncologist (if needed)',
+          ],
+        } as ActionPlan,
+      }
+    }
+
+    // Fallback for unrecognized denial codes
+    return {
+      rules: [] as RuleResult[],
+      plan: {
+        recommended_action: `Denial code ${code} — manual review required. No automated rule set available for this denial type.`,
+        flags: { DenialCode: code },
+        documents_collected: ['Original EOB'],
+      } as ActionPlan,
+    }
   }
 
   // Simulate the two-phase analysis with mock data
@@ -1460,10 +2012,10 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
         const { rules, plan } = buildMockAnalysis()
         setRuleResults(rules)
         setActionPlan(plan)
-      }, 2000)
+      }, 400)
 
       return () => clearTimeout(t2)
-    }, 900)
+    }, 300)
 
     return () => {
       cancelled = true

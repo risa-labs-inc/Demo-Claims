@@ -396,6 +396,95 @@ async function main() {
       secondaryDeniedLineItems: '99213, 96401, 85730',
     },
 
+    // ─── 2 CODING DENIAL CLAIMS ──────────────────────────────────────────────────
+    // Denied due to coding errors: wrong modifier or diagnosis-procedure mismatch.
+    // Each triggers the full 14-rule Coding Denial engine.
+
+    // CODING DENIAL #1 — CO-4: Modifier mismatch — modifier -57 appended to 99213
+    //                    instead of required modifier -25 for same-day E&M + infusion
+    {
+      mrn: '584921',
+      patientFirstName: 'James',
+      patientLastName: 'Thornton',
+      dateOfBirth: '05/22/1964',
+      providerFirstName: 'Dr. Rachel',
+      providerLastName: 'Lee',
+      providerNpi: '1847293056',
+      primaryInsurance: 'Cigna',
+      primaryMemberId: 'CIG7723891',
+      secondaryInsurance: null,
+      secondaryMemberId: null,
+      claimId: 'CIG553891',
+      dateOfService: '02/14/2026',
+      chargeAmount: 6840.00,
+      claimReceivedDate: '02/16/2026',
+      claimNumber: '2026021400553',
+      claimStatus: 'DENIED',
+      checkNumber: null,
+      checkDate: null,
+      paidAmount: 0,
+      paidDate: null,
+      deniedCode: 'CO-4',
+      denialDate: '03/05/2026',
+      denialDescription: 'The service is inconsistent with the modifier billed.',
+      deniedLineItems: '99213, 96413, 96415',
+      remarks: 'Cigna denied claim CO-4 — modifier -57 was appended to CPT 99213 (E&M). Modifier -57 is reserved for E&M visits resulting in the decision to perform a major surgical procedure the same or next day. For same-day E&M with infusion (96413, 96415), modifier -25 is required. Full claim denied pending corrected resubmission with modifier -25 on CPT 99213.',
+      stage: 'PENDING_VALIDATION',
+      secondaryClaimNumber: null,
+      secondaryClaimReceivedDate: null,
+      secondaryClaimStatus: null,
+      secondaryCheckNumber: null,
+      secondaryCheckDate: null,
+      secondaryPaidAmount: 0,
+      secondaryPaidDate: null,
+      secondaryDeniedCode: null,
+      secondaryDenialDescription: null,
+      secondaryDeniedLineItems: null,
+    },
+
+    // CODING DENIAL #2 — CO-11: Diagnosis inconsistent with procedure —
+    //                    Z79.899 (long-term drug therapy) does not support
+    //                    chemotherapy infusion or trastuzumab (J9355) per LCD L34587
+    {
+      mrn: '637452',
+      patientFirstName: 'Dorothy',
+      patientLastName: 'Kim',
+      dateOfBirth: '08/17/1967',
+      providerFirstName: 'Dr. James',
+      providerLastName: 'Parker',
+      providerNpi: '1965748302',
+      primaryInsurance: 'Blue Cross Blue Shield',
+      primaryMemberId: 'BCBS4492037',
+      secondaryInsurance: null,
+      secondaryMemberId: null,
+      claimId: 'BCBS774312',
+      dateOfService: '02/28/2026',
+      chargeAmount: 9340.00,
+      claimReceivedDate: '03/02/2026',
+      claimNumber: '2026022800774',
+      claimStatus: 'DENIED',
+      checkNumber: null,
+      checkDate: null,
+      paidAmount: 0,
+      paidDate: null,
+      deniedCode: 'CO-11',
+      denialDate: '03/18/2026',
+      denialDescription: 'The diagnosis is inconsistent with the procedure.',
+      deniedLineItems: '96413, 96415, J9355',
+      remarks: 'BCBS denied CO-11 — primary diagnosis Z79.899 does not support chemotherapy infusion (96413, 96415) or trastuzumab (J9355) per LCD L34587. An active oncologic diagnosis with appropriate ICD-10 specificity (4th–7th character) is required. Resubmit with correct primary diagnosis (e.g., C50.911 — HER2+ right breast cancer) supported by pathology report and oncology treatment records.',
+      stage: 'PROCESSED',
+      secondaryClaimNumber: null,
+      secondaryClaimReceivedDate: null,
+      secondaryClaimStatus: null,
+      secondaryCheckNumber: null,
+      secondaryCheckDate: null,
+      secondaryPaidAmount: 0,
+      secondaryPaidDate: null,
+      secondaryDeniedCode: null,
+      secondaryDenialDescription: null,
+      secondaryDeniedLineItems: null,
+    },
+
     // ─── 3 IN-PROCESS CLAIMS ─────────────────────────────────────────────────────
     // Claims submitted and received by the payer, currently pending adjudication.
     // No payment or denial details available yet.
@@ -569,7 +658,7 @@ async function main() {
     })
   }
 
-  console.log(`Created ${claimsData.length} claims (3 PAID · 3 DENIED · 2 PARTIALLY-PAID · 3 IN-PROCESS)`)
+  console.log(`Created ${claimsData.length} claims (3 PAID · 5 DENIED · 2 PARTIALLY-PAID · 3 IN-PROCESS)`)
   console.log('Seeding complete!')
 }
 

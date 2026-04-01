@@ -434,7 +434,7 @@ export function ClaimsTable({
                   </td>
                   <td className="px-2 py-1.5">
                     <div className="text-gray-900 text-xs">
-                      {claim.providerFirstName.replace(/^Dr\.\s*/i, 'Dr. ')}{claim.providerLastName}
+                      {claim.providerFirstName.replace(/^Dr\.\s*/i, 'Dr. ')} {claim.providerLastName}
                     </div>
                     <div className="text-[10px] text-gray-500">ID: {claim.providerNpi}</div>
                   </td>
