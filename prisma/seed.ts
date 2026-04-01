@@ -404,8 +404,8 @@ async function main() {
     //                    instead of required modifier -25 for same-day E&M + infusion
     {
       mrn: '584921',
-      patientFirstName: 'James',
-      patientLastName: 'Thornton',
+      patientFirstName: 'Jeremy',
+      patientLastName: 'Wade',
       dateOfBirth: '05/22/1964',
       providerFirstName: 'Dr. Rachel',
       providerLastName: 'Lee',
