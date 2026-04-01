@@ -92,7 +92,7 @@ export function ClaimsTable({
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
   const [filters, setFilters] = useState<FilterState>(emptyFilters)
   const [currentPage, setCurrentPage] = useState(1)
-  const PAGE_SIZE = 10
+  const PAGE_SIZE = 50
 
   const getActiveFilterCount = () => {
     let count = 0
