@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { Search, Filter, RefreshCw, Copy, ChevronDown } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Search, Filter, RefreshCw, Copy, ChevronDown, StickyNote, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { StageBadge } from './StageBadge'
@@ -38,6 +38,7 @@ interface ClaimsTableProps {
   filterByClaimStatus?: string[]
   emptyState?: boolean
   showDenialStage?: boolean
+  showNotesColumn?: boolean
   initialClaims?: ClaimWithAssignee[]
 }
 
@@ -80,6 +81,7 @@ export function ClaimsTable({
   filterByClaimStatus,
   emptyState = false,
   showDenialStage = false,
+  showNotesColumn = false,
   initialClaims,
 }: ClaimsTableProps) {
   const { toast } = useToast()
@@ -93,6 +95,14 @@ export function ClaimsTable({
   const [filters, setFilters] = useState<FilterState>(emptyFilters)
   const [currentPage, setCurrentPage] = useState(1)
   const PAGE_SIZE = 50
+  const [notes, setNotes] = useState<Record<string, string>>({})
+  const [viewingNote, setViewingNote] = useState<{ claimId: string; note: string; patientName: string } | null>(null)
+
+  useEffect(() => {
+    try {
+      setNotes(JSON.parse(localStorage.getItem('rcm_denial_notes') ?? '{}'))
+    } catch { /* ignore */ }
+  }, [])
 
   const getActiveFilterCount = () => {
     let count = 0
@@ -393,7 +403,7 @@ export function ClaimsTable({
                 Assigned <ChevronDown className="inline h-2.5 w-2.5 ml-0.5" />
               </th>
               <th className="px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                Actions
+                {showNotesColumn ? 'Notes' : 'Actions'}
               </th>
             </tr>
           </thead>
@@ -497,7 +507,18 @@ export function ClaimsTable({
                     </Select>
                   </td>
                   <td className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
-                    {(claim.stage === 'PROCESSED' || claim.stage === 'VALIDATED') ? (
+                    {showNotesColumn ? (
+                      <button
+                        className="p-1 rounded hover:bg-gray-100"
+                        title={notes[claim.id] ? 'View note' : 'No note yet'}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setViewingNote({ claimId: claim.id, note: notes[claim.id] ?? '', patientName: `${claim.patientFirstName} ${claim.patientLastName}` })
+                        }}
+                      >
+                        <StickyNote className={`h-4 w-4 ${notes[claim.id] ? 'text-blue-500' : 'text-gray-300'}`} />
+                      </button>
+                    ) : (claim.stage === 'PROCESSED' || claim.stage === 'VALIDATED') ? (
                       <button
                         className="p-1 hover:bg-gray-100 rounded"
                         onClick={(e) => copyToClipboard(generateClaimTemplate(claim), e)}
@@ -505,10 +526,7 @@ export function ClaimsTable({
                         <Copy className="h-3.5 w-3.5 text-gray-400" />
                       </button>
                     ) : (
-                      <button
-                        className="p-1 rounded cursor-not-allowed opacity-30"
-                        disabled
-                      >
+                      <button className="p-1 rounded cursor-not-allowed opacity-30" disabled>
                         <Copy className="h-3.5 w-3.5 text-gray-400" />
                       </button>
                     )}
@@ -580,6 +598,36 @@ export function ClaimsTable({
           </div>
         )
       })()}
+
+      {/* Note Viewer Popup */}
+      {viewingNote && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={() => setViewingNote(null)}>
+          <div className="bg-white rounded-xl shadow-xl w-[480px] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <StickyNote className="h-4 w-4 text-blue-600" />
+                <span className="text-sm font-semibold text-gray-800">Analyst Note</span>
+                <span className="text-xs text-gray-400">— {viewingNote.patientName}</span>
+              </div>
+              <button onClick={() => setViewingNote(null)} className="p-1 rounded hover:bg-gray-100 text-gray-400">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-5">
+              {viewingNote.note ? (
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{viewingNote.note}</p>
+              ) : (
+                <p className="text-sm text-gray-400 italic">No note added yet. Open the Denial Management screen to add a note.</p>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
+              <button onClick={() => setViewingNote(null)} className="px-4 py-1.5 text-sm font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-700">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filter Modal */}
       <FilterModal

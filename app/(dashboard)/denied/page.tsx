@@ -24,6 +24,7 @@ export default async function DeniedCasesPage() {
       filterByClaimStatus={['DENIED']}
       filterByAssignee={userName}
       showDenialStage
+      showNotesColumn
       initialClaims={serializeClaims(raw)}
     />
   )

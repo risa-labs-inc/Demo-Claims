@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { ChevronRight, ChevronDown, ExternalLink } from 'lucide-react'
+import { ChevronRight, ChevronDown, ExternalLink, PenLine, StickyNote, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ClaimWithAssignee } from '@/lib/types'
 import { formatDate, formatCurrency } from '@/lib/utils'
@@ -66,6 +66,86 @@ const STATUS_STYLES: Record<string, string> = {
   WARNING: 'bg-yellow-100 text-yellow-700',
   MANUAL: 'bg-gray-100 text-gray-600',
   SKIPPED: 'bg-gray-100 text-gray-400',
+}
+
+// ─── Note Modal ───────────────────────────────────────────────────────────────
+
+const NOTES_KEY = 'rcm_denial_notes'
+
+function NoteModal({ initialNote, onSave, onClose }: {
+  initialNote: string
+  onSave: (text: string) => void
+  onClose: () => void
+}) {
+  const [text, setText] = useState(initialNote)
+  const [viewing, setViewing] = useState(!!initialNote)
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center">
+      <div className="bg-white rounded-xl shadow-xl w-[520px] flex flex-col max-h-[80vh]">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <StickyNote className="h-4 w-4 text-blue-600" />
+            <span className="text-sm font-semibold text-gray-800">Analyst Note</span>
+          </div>
+          <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 flex-1 overflow-y-auto">
+          {viewing ? (
+            <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{text || '—'}</p>
+          ) : (
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Write your analysis for this denial..."
+              autoFocus
+              className="w-full h-48 text-sm border border-gray-200 rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400"
+            />
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-gray-100 flex justify-end gap-2">
+          {viewing ? (
+            <>
+              <button
+                onClick={() => setViewing(false)}
+                className="px-4 py-1.5 text-sm font-medium border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-700"
+              >
+                Edit
+              </button>
+              <button
+                onClick={onClose}
+                className="px-4 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Close
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={onClose}
+                className="px-4 py-1.5 text-sm font-medium border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { onSave(text); setViewing(true) }}
+                className="px-4 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Save Note
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ─── Rule row ─────────────────────────────────────────────────────────────────
@@ -495,12 +575,16 @@ function AutomatedAnalysis({
   loading,
   onViewCoverLetter,
   onDocClick,
+  note,
+  onAddNote,
 }: {
   ruleResults: RuleResult[] | null
   actionPlan: ActionPlan | null
   loading: boolean
   onViewCoverLetter: () => void
   onDocClick: (docName: string) => void
+  note: string
+  onAddNote: () => void
 }) {
   const [activeTab, setActiveTab] = useState(0)
 
@@ -533,15 +617,28 @@ function AutomatedAnalysis({
           </div>
           <p className="text-xs text-gray-400 mt-0.5">Step-by-step validation results</p>
         </div>
-        <button
-          onClick={onViewCoverLetter}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-gray-300 rounded hover:bg-gray-50 text-gray-700"
-        >
-          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-          View Cover Letter
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onAddNote}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded transition-colors ${
+              note
+                ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <PenLine className="h-3.5 w-3.5" />
+            {note ? 'View Note' : 'Add Note'}
+          </button>
+          <button
+            onClick={onViewCoverLetter}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-gray-300 rounded hover:bg-gray-50 text-gray-700"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            View Cover Letter
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -854,6 +951,24 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
   const [currentDenialStage, setCurrentDenialStage] = useState<string | null>(claim.denialStage ?? null)
   const [showCoverLetter, setShowCoverLetter] = useState(false)
   const [viewingDoc, setViewingDoc] = useState<string | null>(null)
+  const [showNoteModal, setShowNoteModal] = useState(false)
+  const [note, setNote] = useState('')
+
+  useEffect(() => {
+    try {
+      const notes = JSON.parse(localStorage.getItem(NOTES_KEY) ?? '{}')
+      setNote(notes[claim.id] ?? '')
+    } catch { /* ignore */ }
+  }, [claim.id])
+
+  const saveNote = (text: string) => {
+    try {
+      const notes = JSON.parse(localStorage.getItem(NOTES_KEY) ?? '{}')
+      notes[claim.id] = text
+      localStorage.setItem(NOTES_KEY, JSON.stringify(notes))
+    } catch { /* ignore */ }
+    setNote(text)
+  }
 
   const currentPlan = activeTab === 'primary' ? claim.primaryInsurance : claim.secondaryInsurance
 
@@ -2273,9 +2388,20 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             loading={loading || (ruleResults === null && !loading)}
             onViewCoverLetter={() => setShowCoverLetter(true)}
             onDocClick={(docName) => setViewingDoc(docName)}
+            note={note}
+            onAddNote={() => setShowNoteModal(true)}
           />
         </div>
       </div>
+
+      {/* Note Modal */}
+      {showNoteModal && (
+        <NoteModal
+          initialNote={note}
+          onSave={saveNote}
+          onClose={() => setShowNoteModal(false)}
+        />
+      )}
 
       {/* Cover Letter Modal */}
       {showCoverLetter && (
