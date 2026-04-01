@@ -91,6 +91,8 @@ export function ClaimsTable({
   const [selectedClaim, setSelectedClaim] = useState<ClaimWithAssignee | null>(null)
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
   const [filters, setFilters] = useState<FilterState>(emptyFilters)
+  const [currentPage, setCurrentPage] = useState(1)
+  const PAGE_SIZE = 10
 
   const getActiveFilterCount = () => {
     let count = 0
@@ -177,6 +179,8 @@ export function ClaimsTable({
       console.error('Failed to fetch providers:', error)
     }
   }, [])
+
+  useEffect(() => { setCurrentPage(1) }, [claims.length, searchQuery, filters])
 
   useEffect(() => {
     fetchClaims()
@@ -407,7 +411,7 @@ export function ClaimsTable({
                 </td>
               </tr>
             ) : (
-              claims.map((claim) => (
+              claims.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map((claim) => (
                 <tr
                   key={claim.id}
                   className="hover:bg-gray-50 cursor-pointer"
@@ -515,6 +519,67 @@ export function ClaimsTable({
           </tbody>
         </table>
       </div>
+
+      {/* Pagination Strip */}
+      {claims.length > 0 && (() => {
+        const totalPages = Math.ceil(claims.length / PAGE_SIZE)
+        if (totalPages <= 1) return null
+        const startItem = (currentPage - 1) * PAGE_SIZE + 1
+        const endItem = Math.min(currentPage * PAGE_SIZE, claims.length)
+
+        // Build page number window (up to 5 pages centred on current)
+        const windowSize = 5
+        let start = Math.max(1, currentPage - Math.floor(windowSize / 2))
+        const end = Math.min(totalPages, start + windowSize - 1)
+        if (end - start < windowSize - 1) start = Math.max(1, end - windowSize + 1)
+        const pages = Array.from({ length: end - start + 1 }, (_, i) => start + i)
+
+        return (
+          <div className="flex items-center justify-center px-6 py-3 border-t border-gray-100 bg-white shrink-0">
+            <div className="flex items-center gap-1">
+              {/* Previous */}
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-600 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                Previous
+              </button>
+
+              {/* Page numbers */}
+              {pages.map(p => (
+                <button
+                  key={p}
+                  onClick={() => setCurrentPage(p)}
+                  className={`w-8 h-8 text-sm rounded transition-colors ${
+                    p === currentPage
+                      ? 'bg-gray-900 text-white font-semibold'
+                      : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+
+              {/* Next */}
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-600 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+              </button>
+            </div>
+
+            {/* Showing X - Y of Z */}
+            <span className="absolute right-6 text-sm text-gray-500">
+              Showing {startItem}–{endItem} of {claims.length}
+            </span>
+          </div>
+        )
+      })()}
 
       {/* Filter Modal */}
       <FilterModal
