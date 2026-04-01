@@ -192,8 +192,8 @@ function CoverLetterModal({
   const subject = (() => {
     if (code === 'CO-27') return `Appeal of Claim Denial – Coverage Termination (CO-27)\nPatient: ${claim.patientFirstName} ${claim.patientLastName} | Claim #: ${claim.claimNumber ?? claim.claimId} | DOS: ${dos}`
     if (code === 'CO-28') return `Appeal of Claim Denial – Coverage Not in Effect (CO-28)\nPatient: ${claim.patientFirstName} ${claim.patientLastName} | Claim #: ${claim.claimNumber ?? claim.claimId} | DOS: ${dos}`
-    if (code === 'CO-97') return `Appeal of Partial Denial – Bundling / NCCI Edit (CO-97)\nPatient: ${claim.patientFirstName} ${claim.patientLastName} | Claim #: ${claim.claimNumber ?? claim.claimId} | DOS: ${dos}`
-    if (code === 'CO-50') return `Appeal of Partial Denial – Medical Necessity (CO-50)\nPatient: ${claim.patientFirstName} ${claim.patientLastName} | Claim #: ${claim.claimNumber ?? claim.claimId} | DOS: ${dos}`
+    if (code === 'CO-97') return `Appeal of Partial Denial – Coding Denial (CO-97)\nPatient: ${claim.patientFirstName} ${claim.patientLastName} | Claim #: ${claim.claimNumber ?? claim.claimId} | DOS: ${dos}`
+    if (code === 'CO-50') return `Appeal of Partial Denial – Eligibility Denial (CO-50)\nPatient: ${claim.patientFirstName} ${claim.patientLastName} | Claim #: ${claim.claimNumber ?? claim.claimId} | DOS: ${dos}`
     {
       const appealClaimNum = claim.secondaryClaimNumber ?? (claim.claimNumber ?? claim.claimId)
       return `Appeal of Secondary Claim Denial – Missing Primary EOB (CO-22)\nPatient: ${claim.patientFirstName} ${claim.patientLastName} | Secondary Claim #: ${appealClaimNum} | DOS: ${dos}`
@@ -871,8 +871,9 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
     denial_reason: denialDescription || 'Patient ineligible for service',
     denial_type: (() => {
       const c = denialCode.split(',')[0]?.trim() ?? ''
-      if (c === 'CO-97') return 'Billing / Bundling Denial'
-      if (c === 'CO-50') return 'Medical Necessity Denial'
+      if (c === 'CO-97') return 'Coding Denial'
+      if (c === 'CO-50') return 'Eligibility Denial'
+      if (c === 'CO-4' || c === 'CO-11') return 'Coding Denial'
       return 'Eligibility Denial'
     })(),
     diagnosis_codes: ['C34.12', 'C50.911', 'Z51.11'],
@@ -1254,57 +1255,140 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
     }
 
     if (code === 'CO-97') {
-      // Bundling denial — E&M denied same day as infusion; modifier 25 missing
+      // Coding denial — E&M denied same day as infusion; modifier 25 missing (NCCI bundling edit)
       const paidCpts = (claim.remarks ?? '').match(/Paid CPTs?:\s*([^.\n]+)/)?.[1] ?? '96413, 96415, J9355'
       const paidAmt = formatCurrency(primaryPaidAmount)
+      const deniedEm = claim.deniedLineItems ?? '99215'
       return {
         rules: [
+          // ── Bundling & Unbundling ──────────────────────────────────────────────
           {
-            rule_name: 'Bundling Denial Confirmed',
-            decision_question: 'Was this claim denied due to NCCI bundling rules?',
-            status: 'PASSED' as const,
-            explanation: `CARC code CO-97 confirms a bundling denial. ${payer} determined that CPT ${claim.deniedLineItems} is included in the payment for another service billed on the same date (${dos}). Payer adjudicated and paid ${paidAmt} for ${paidCpts} but denied the E&M as bundled per National Correct Coding Initiative (NCCI) edits.`,
-            data_used: { denialCode: 'CO-97', denialCategory: 'Billing / Bundling Denial', paidCPTs: paidCpts, deniedCPTs: claim.deniedLineItems ?? '', paidAmount: paidAmt },
+            section_header: 'Bundling & Unbundling',
+            rule_name: 'NCCI Bundling Edit Confirmed',
+            decision_question: 'Was this claim denied due to an NCCI bundling edit?',
+            status: 'FAILED' as const,
+            explanation: `CARC code CO-97 confirms an NCCI bundling edit. ${payer} determined that CPT ${deniedEm} is included in the payment allowance for the infusion services billed on the same date (${dos}). Payer paid ${paidAmt} for ${paidCpts} but denied ${deniedEm} as a bundled component per CMS NCCI Column 1/Column 2 edits.`,
+            data_used: { denialCode: 'CO-97', denialCategory: 'Coding Denial', paidCPTs: paidCpts, deniedCPT: deniedEm, paidAmount: paidAmt },
             sources: ['Availity API', 'CMS NCCI'],
           },
           {
-            rule_name: 'Modifier 25 Check',
-            decision_question: 'Was modifier 25 appended to the E&M code to indicate a separately identifiable service?',
+            rule_name: 'Column 1 / Column 2 Edit Check',
+            decision_question: 'Is the denied CPT listed as Column 2 to the paid infusion CPTs under NCCI edits?',
             status: 'FAILED' as const,
-            explanation: `CPT ${claim.deniedLineItems} was submitted without modifier 25. Per NCCI policy, when an E&M service is billed on the same day as a procedure or infusion, modifier 25 ("Significant, separately identifiable evaluation and management service by the same physician on the day of a procedure") must be appended to the E&M code. Without modifier 25, ${payer}'s system automatically bundles the E&M into the infusion payment.`,
-            data_used: { missingModifier: '25', requiredBy: 'NCCI Bundling Edits', deniedCPT: claim.deniedLineItems ?? '', bundledWith: paidCpts },
-            sources: ['CMS NCCI', 'Availity API'],
-          },
-          {
-            rule_name: 'NCCI Edit Validation',
-            decision_question: 'Do NCCI edits confirm that modifier 25 allows separate billing of the E&M?',
-            status: 'PASSED' as const,
-            explanation: `NCCI Column 1/Column 2 edits confirm that CPT ${claim.deniedLineItems} is bundled with infusion administration codes. However, the edit has a modifier indicator of "1," meaning the bundle CAN be bypassed with the correct modifier (modifier 25). The denial is correctable by resubmitting with modifier 25 appended to ${claim.deniedLineItems}.`,
-            data_used: { ncciEditStatus: 'Bundled — modifier 25 bypass available', modifierIndicator: '1', correctionPath: `Resubmit ${claim.deniedLineItems}-25` },
+            explanation: `NCCI Column 1/Column 2 table confirms that ${deniedEm} (E&M) is a Column 2 code to CPT 96413 (Column 1 — infusion administration). When billed together on the same DOS without modifier 25, the Column 2 code is automatically bundled into the Column 1 allowance. The modifier indicator for this edit is "1," meaning the bundle is bypassable with the correct modifier.`,
+            data_used: { column1CPT: '96413', column2CPT: deniedEm, modifierIndicator: '1', bypassModifier: '25', editSource: 'CMS NCCI Table' },
             sources: ['CMS NCCI'],
           },
           {
-            rule_name: 'Clinical Documentation Review',
-            decision_question: 'Is there documentation supporting a distinct E&M visit separate from the infusion?',
-            status: 'MANUAL' as const,
-            explanation: `To support the modifier 25 claim on appeal, clinical documentation must show that the E&M (${claim.deniedLineItems}) addressed a problem or clinical decision beyond the infusion administration itself. Review the progress note for ${dos} to confirm a separately identifiable chief complaint, history, exam, and medical decision-making distinct from infusion management.`,
-            data_used: { documentationRequired: 'Progress note demonstrating separate medical decision-making', dateOfService: dos, cptUnderReview: claim.deniedLineItems ?? '' },
-            sources: ['OncoEMR'],
+            rule_name: 'Modifier Bypass Eligibility',
+            decision_question: 'Can modifier 25 override the bundling edit for this code pair?',
+            status: 'PASSED' as const,
+            explanation: `The NCCI edit for ${deniedEm} with 96413 carries modifier indicator "1," confirming that modifier 25 ("Significant, separately identifiable evaluation and management service by the same physician on the day of a procedure") is an approved bypass modifier for this code pair. Resubmitting with ${deniedEm}-25 will override the bundling edit and allow separate reimbursement, provided clinical documentation supports a distinct E&M visit.`,
+            data_used: { ncciBypassAllowed: 'Yes', bypassModifier: '25', correctionPath: `Resubmit as ${deniedEm}-25`, editModifierIndicator: '1' },
+            sources: ['CMS NCCI', 'AMA CPT'],
+          },
+          // ── Medical Necessity ─────────────────────────────────────────────────
+          {
+            section_header: 'Medical Necessity',
+            rule_name: 'Medical Necessity Validation',
+            decision_question: 'Was the E&M visit medically necessary on the date of infusion?',
+            status: 'PASSED' as const,
+            explanation: `The denial is a coding/modifier error, not a medical necessity determination. ${payer} did not challenge the clinical necessity of CPT ${deniedEm} — the E&M was denied solely because modifier 25 was missing on the claim. Medical necessity is presumed met; the corrected claim with modifier 25 does not require a medical necessity appeal.`,
+            data_used: { medicalNecessityDenied: 'No — coding error only', denialReason: 'Missing modifier 25', medicalNecessityAppealNeeded: 'No' },
+            sources: ['Availity API', 'OncoEMR'],
           },
           {
-            rule_name: 'Resubmission Eligibility Check',
-            decision_question: 'Is the corrected claim within the timely filing window?',
-            status: 'WARNING' as const,
-            explanation: `${payer} generally allows corrected claim resubmission within 365 days of the DOS. DOS is ${dos}. Verify the exact corrected claim deadline in the ${payer} provider contract to ensure the resubmission will be accepted. Act promptly to avoid timely filing denial.`,
-            data_used: { dateOfService: dos, typicalCorrectedClaimWindow: '365 days from DOS', action: `Resubmit ${claim.deniedLineItems}-25 with updated modifier` },
+            rule_name: 'LCD / NCD Coverage Check',
+            decision_question: 'Are all billed CPT codes covered under the applicable LCD or payer coverage policy?',
+            status: 'PASSED' as const,
+            explanation: `All CPT codes on this claim — ${paidCpts}, ${deniedEm} — are covered services under ${payer}'s oncology benefit. No LCD or NCD exclusion applies to ${deniedEm} for this diagnosis. Coverage is confirmed; the only barrier to reimbursement is the missing modifier 25 on the corrected claim.`,
+            data_used: { payer, coveredCPTs: `${paidCpts}, ${deniedEm}`, lcdExclusion: 'None found', coverageStatus: 'Covered — modifier correction required' },
+            sources: ['Availity API', 'CMS NCCI'],
+          },
+          {
+            rule_name: 'Clinical Documentation Adequacy',
+            decision_question: 'Does the progress note support a separately identifiable E&M service beyond infusion management?',
+            status: 'MANUAL' as const,
+            explanation: `Manual review required before resubmitting with modifier 25. Pull the treating physician's progress note for ${dos} and confirm it documents: (1) a distinct chief complaint or clinical problem, (2) a focused history and exam, and (3) medical decision-making that goes beyond routine infusion oversight. If the note solely documents infusion administration, modifier 25 cannot be supported and the denial stands.`,
+            data_used: { reviewRequired: 'Yes — progress note for ' + dos, mustDocument: 'Distinct chief complaint, H&P, and MDM separate from infusion', cptUnderReview: deniedEm },
+            sources: ['OncoEMR'],
+          },
+          // ── CPT & Modifier Validity ───────────────────────────────────────────
+          {
+            section_header: 'CPT & Modifier Validity',
+            rule_name: 'CPT Code Validity Check',
+            decision_question: 'Are all submitted CPT codes valid and active for the date of service?',
+            status: 'PASSED' as const,
+            explanation: `All CPT codes submitted on this claim — ${paidCpts}, ${deniedEm} — are valid, active CPT codes as of ${dos}. No invalid, deleted, or unlisted CPT codes were identified. The denial is not related to CPT code validity.`,
+            data_used: { cptCodes: `${paidCpts}, ${deniedEm}`, cptValidityStatus: 'All valid', dateOfService: dos },
+            sources: ['AMA CPT', 'Availity API'],
+          },
+          {
+            rule_name: 'Modifier 25 Application Check',
+            decision_question: 'Was modifier 25 correctly appended to the E&M on the original claim?',
+            status: 'FAILED' as const,
+            explanation: `CPT ${deniedEm} was submitted on the original claim without any modifier. Modifier 25 was not appended. Per CMS and NCCI guidelines, E&M services billed on the same day as a minor or endoscopic procedure or infusion service require modifier 25 to be paid separately. This omission is the direct cause of the CO-97 denial. Corrective action: resubmit with ${deniedEm}-25.`,
+            data_used: { originalModifier: 'None', requiredModifier: '25', cpt: deniedEm, correctionAction: `Resubmit ${deniedEm}-25` },
+            sources: ['CMS NCCI', 'AMA CPT'],
+          },
+          {
+            rule_name: 'E&M Complexity Level Verification',
+            decision_question: 'Is the E&M complexity level (99215) appropriate for the visit documented?',
+            status: 'PASSED' as const,
+            explanation: `CPT 99215 (high-complexity office visit, typically 40–54 minutes with high MDM) is appropriate for oncology patients receiving active chemotherapy. The visit complexity is consistent with the patient's active diagnosis and treatment protocol. No downcoding risk identified — the 99215 level is defensible given the clinical context.`,
+            data_used: { emCode: deniedEm, complexityLevel: 'High (99215)', clinicalJustification: 'Active oncology patient, chemotherapy infusion, high MDM', downcodeRisk: 'Low' },
+            sources: ['OncoEMR', 'AMA CPT'],
+          },
+          // ── Units & POS ───────────────────────────────────────────────────────
+          {
+            section_header: 'Units & POS',
+            rule_name: 'Units of Service Verification',
+            decision_question: 'Are the units billed for each CPT code within acceptable NCCI MUE limits?',
+            status: 'PASSED' as const,
+            explanation: `Units of service for all CPT codes on this claim are within CMS Medically Unlikely Edit (MUE) limits. CPT ${deniedEm} billed 1 unit (MUE adjudication indicator: 3; MUE limit: 1 per DOS per provider). Infusion CPTs 96413 and 96415 units are also within MUE limits. No MUE violation identified.`,
+            data_used: { cpt: deniedEm, unitsBilled: '1', mueLimit: '1', mueStatus: 'Within limits', infusionUnits: 'Within MUE limits' },
+            sources: ['CMS NCCI', 'Availity API'],
+          },
+          {
+            rule_name: 'Place of Service Validation',
+            decision_question: 'Is the place of service consistent with the billed CPT codes?',
+            status: 'PASSED' as const,
+            explanation: `Place of service on the claim is consistent with the CPT codes billed. Oncology infusion services (96413, 96415) and office E&M (${deniedEm}) are appropriately billed together for an outpatient oncology clinic setting. No POS mismatch detected.`,
+            data_used: { placeOfService: 'Outpatient Oncology Clinic', cptConsistency: 'Confirmed', posConflict: 'None' },
+            sources: ['Availity API', 'Candid PMS'],
+          },
+          // ── Claim Integrity ───────────────────────────────────────────────────
+          {
+            section_header: 'Claim Integrity',
+            rule_name: 'Date of Service & Diagnosis Consistency',
+            decision_question: 'Are the DOS and diagnosis codes consistent across the claim and EMR records?',
+            status: 'PASSED' as const,
+            explanation: `DOS ${dos} and diagnosis codes are consistent across the claim, OncoEMR encounter record, and Candid PMS billing record. No discrepancy in DOS or ICD coding was identified. All diagnoses correctly support the infusion CPTs. The only correctable issue is the missing modifier 25 on CPT ${deniedEm}.`,
+            data_used: { dosConsistency: 'Confirmed across claim and EMR', diagnosisConsistency: 'Confirmed', source: 'Candid PMS, OncoEMR' },
+            sources: ['OncoEMR', 'Candid PMS'],
+          },
+          {
+            rule_name: 'Provider Enrollment & Credentialing',
+            decision_question: 'Is the billing provider active and credentialed with the payer on the date of service?',
+            status: 'PASSED' as const,
+            explanation: `Provider NPI ${claim.providerNpi} is active and credentialed with ${payer} as of ${dos}. No credentialing lapse, exclusion, or enrollment discrepancy detected. The denial is not related to provider status.`,
+            data_used: { providerNpi: claim.providerNpi, payer, credentialingStatus: 'Active', enrollmentStatus: 'Active — no lapse', dateOfService: dos },
+            sources: ['Availity API', 'Candid PMS'],
+          },
+          {
+            rule_name: 'Duplicate Claim Check',
+            decision_question: 'Is there a duplicate claim submission for this DOS and CPT combination?',
+            status: 'PASSED' as const,
+            explanation: `No duplicate claim found for CPT ${deniedEm} on DOS ${dos} for this patient. The original claim was submitted once. The corrected claim resubmission (with modifier 25) should be submitted as a corrected claim (frequency code 7 on 837P) — not a duplicate — to avoid a secondary denial for duplicate billing.`,
+            data_used: { duplicateFound: 'No', originalClaimNumber: claim.claimNumber ?? claim.claimId, resubmissionNote: 'Submit corrected claim with frequency code 7 (corrected claim)' },
             sources: ['Candid PMS', 'Availity API'],
           },
         ] as RuleResult[],
         plan: {
           recommended_action:
-            `CO-97 bundling denial — CPT ${claim.deniedLineItems} denied as included in infusion payment. ${payer} paid ${paidAmt} for ${paidCpts}. To recover the denied E&M: (1) Pull the progress note for ${dos} and confirm it documents a separately identifiable service beyond infusion management. (2) Resubmit a corrected claim with modifier 25 appended to CPT ${claim.deniedLineItems} (i.e., ${claim.deniedLineItems}-25). (3) Attach the supporting clinical note to the corrected claim. (4) Verify corrected claim is submitted within ${payer}'s timely filing window from DOS (${dos}).`,
+            `CO-97 coding denial — CPT ${deniedEm} denied as bundled with infusion payment. ${payer} paid ${paidAmt} for ${paidCpts}. To recover the denied E&M: (1) Pull the progress note for ${dos} and verify it documents a separately identifiable service beyond infusion management (distinct chief complaint, H&P, and MDM). (2) Resubmit a corrected claim (frequency code 7) with modifier 25 appended to CPT ${deniedEm} (i.e., ${deniedEm}-25). (3) Attach the supporting clinical note to the corrected claim. (4) Verify corrected claim is submitted within ${payer}'s timely filing window from DOS (${dos}).`,
           flags: {
-            DeniedCPT: claim.deniedLineItems ?? '',
+            DeniedCPT: deniedEm,
             RequiredModifier: '25 (Significant, separately identifiable E&M)',
             PaidCPTs: paidCpts,
             AmountAlreadyPaid: paidAmt,
@@ -1322,63 +1406,87 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
     }
 
     if (code === 'CO-50') {
-      // Medical necessity denial — additional infusion hours and drug not pre-authorized
+      // Eligibility denial — services denied as non-covered due to missing prior authorization
       const paidCpts = (claim.remarks ?? '').match(/Paid CPTs?:\s*([^.\n]+)/)?.[1] ?? '99215, 96413'
       const paidAmt = formatCurrency(primaryPaidAmount)
       const deniedCpts = claim.deniedLineItems ?? '96415, 96417, J9355'
       return {
         rules: [
           {
-            rule_name: 'Medical Necessity Denial Confirmed',
-            decision_question: 'Was this claim denied due to medical necessity?',
+            rule_name: 'Eligibility Denial Confirmed',
+            decision_question: 'Is this claim denied due to a coverage / eligibility issue?',
             status: 'PASSED' as const,
-            explanation: `CARC code CO-50 confirms a medical necessity denial. ${payer} paid ${paidAmt} for ${paidCpts} but determined that ${deniedCpts} were not medically necessary for this patient on ${dos}. The payer's clinical criteria were not met for the additional infusion duration and drug regimen.`,
-            data_used: { denialCode: 'CO-50', denialCategory: 'Medical Necessity Denial', paidCPTs: paidCpts, deniedCPTs: deniedCpts, paidAmount: paidAmt },
+            explanation: `CARC code CO-50 ("These are non-covered services because this is not deemed a medical necessity by the payer") confirms a coverage-based eligibility denial. ${payer} paid ${paidAmt} for ${paidCpts} but determined that ${deniedCpts} are non-covered on this claim because prior authorization was not obtained. Services without authorization are treated as non-covered under ${payer}'s benefit design.`,
+            data_used: { denialCode: 'CO-50', denialCategory: 'Eligibility Denial', paidCPTs: paidCpts, deniedCPTs: deniedCpts, paidAmount: paidAmt },
             sources: ['Availity API', 'Candid PMS'],
           },
           {
-            rule_name: 'Prior Authorization Verification',
-            decision_question: 'Was prior authorization obtained for the denied services?',
+            rule_name: 'Current Eligibility Status Verification',
+            decision_question: 'Was the patient actively enrolled in the plan on the date of service?',
+            status: 'PASSED' as const,
+            explanation: `Real-time eligibility verification confirms patient was an active ${payer} member (ID: ${memberId}) on ${dos}. The partial payment of ${paidAmt} for ${paidCpts} confirms active enrollment. The CO-50 denial on ${deniedCpts} is not an enrollment issue — it is a coverage authorization issue for those specific line items.`,
+            data_used: { memberId, payer, enrollmentStatus: 'Active on DOS', partialPaymentConfirms: 'Active coverage', denialCause: 'Missing prior authorization — not enrollment' },
+            sources: ['Availity API'],
+          },
+          {
+            rule_name: 'Date of Service Coverage Verification',
+            decision_question: 'Was coverage active and in effect for all services on the date of service?',
+            status: 'PASSED' as const,
+            explanation: `${payer} coverage was active on ${dos} — confirmed by adjudication and payment of ${paidAmt} for ${paidCpts}. Coverage for ${deniedCpts} was also in effect on ${dos}, but those services require prior authorization to be covered. The denial is an authorization gap, not a coverage lapse.`,
+            data_used: { coverageStatus: `Active — ${payer}`, dateOfService: dos, paidServicesConfirmCoverage: paidCpts, deniedDueToAuth: deniedCpts },
+            sources: ['Availity API'],
+          },
+          {
+            rule_name: 'Patient-Policy Link Validation',
+            decision_question: 'Do the member ID and demographics match the active plan on file?',
+            status: 'PASSED' as const,
+            explanation: `Member ID ${memberId}, patient name, and date of birth all match ${payer}'s subscriber records. No demographic discrepancy detected. The eligibility denial is not related to a patient-policy mismatch.`,
+            data_used: { memberId, nameOnFile: `${claim.patientFirstName} ${claim.patientLastName}`, dobOnFile: formatDate(claim.dateOfBirth), demographicMatch: 'Confirmed' },
+            sources: ['Availity API', 'Candid PMS'],
+          },
+          {
+            rule_name: 'Prior Authorization / Referral Check',
+            decision_question: 'Was prior authorization obtained for the denied services before the date of service?',
             status: 'FAILED' as const,
-            explanation: `${payer} records show no prior authorization on file for ${deniedCpts} on DOS ${dos}. Per ${payer}'s clinical policy, extended infusion durations beyond the initial hour and the specific drug regimen require pre-authorization. Services were rendered without authorization, triggering the CO-50 denial.`,
-            data_used: { priorAuthOnFile: 'No', deniedServices: deniedCpts, policyRequirement: `${payer} clinical criteria — PA required for extended infusion and drug`, dateOfService: dos },
+            explanation: `${payer} records show no prior authorization on file for ${deniedCpts} on DOS ${dos}. Per ${payer}'s clinical policy, extended infusion durations beyond the initial hour and the specific drug regimen require pre-authorization. Services were rendered without authorization. Absence of prior auth caused ${payer} to classify ${deniedCpts} as non-covered, triggering the CO-50 eligibility denial.`,
+            data_used: { priorAuthOnFile: 'No', deniedServices: deniedCpts, policyRequirement: `${payer} benefit plan — PA required for extended infusion and specific drug regimen`, dateOfService: dos },
             sources: ['Optum API', 'Availity API'],
           },
           {
-            rule_name: 'Clinical Criteria Assessment',
-            decision_question: 'Do the clinical notes support medical necessity for the denied services?',
-            status: 'MANUAL' as const,
-            explanation: `Manual review required. Pull the treating physician's order, oncology treatment plan, and progress notes for ${dos}. Confirm the clinical rationale for the extended infusion duration and drug selection. Evidence of active oncological diagnosis, prior treatment response, and physician-documented medical necessity will be required for appeal.`,
-            data_used: { reviewRequired: 'Yes — clinical notes and treatment plan', deniedServices: deniedCpts, appealEvidence: 'Physician order, diagnosis confirmation, treatment protocol' },
-            sources: ['OncoEMR'],
-          },
-          {
-            rule_name: 'LCD / Coverage Policy Review',
-            decision_question: 'Are the denied services covered under the applicable LCD or coverage policy?',
+            rule_name: 'Benefits & Coverage Limits Review',
+            decision_question: 'Are the denied services covered benefits under the plan, subject to prior authorization?',
             status: 'WARNING' as const,
-            explanation: `${payer} may apply a Local Coverage Determination (LCD) or internal clinical policy for infusion drug coverage. Verify that the patient's diagnosis codes support coverage of ${deniedCpts} under the applicable LCD. If the LCD supports coverage, include the LCD reference in the appeal.`,
-            data_used: { lcdReviewRequired: 'Yes', deniedServices: deniedCpts, diagnosisCodes: '(see claim)', action: 'Pull applicable LCD and confirm diagnosis-to-drug coverage match' },
-            sources: ['Availity API', 'CMS NCCI'],
-          },
-          {
-            rule_name: 'Retrospective Authorization Request',
-            decision_question: 'Can a retrospective authorization be obtained from the payer?',
-            status: 'WARNING' as const,
-            explanation: `${payer} may allow a retrospective authorization request within 30–60 days of the service date when the treating physician certifies medical necessity. Contact ${payer}'s UM (Utilization Management) department to determine if a retro auth is available for ${deniedCpts} on ${dos}. Approval would allow resubmission of the denied line items.`,
-            data_used: { retroAuthPossible: 'Pending — contact UM department', deniedServices: deniedCpts, dateOfService: dos, typicalWindow: '30–60 days from DOS' },
+            explanation: `${deniedCpts} are covered benefits under the ${payer} plan for oncology patients but are subject to prior authorization requirements. The benefit exists — it was not accessed because authorization was not obtained pre-service. ${payer}'s UM (Utilization Management) department may allow a retrospective authorization within 30–60 days of DOS if medical necessity is documented by the treating physician.`,
+            data_used: { benefitExists: 'Yes — covered benefit with PA requirement', paRequired: 'Yes', retroAuthAvailable: 'Pending UM verification', typicalWindow: '30–60 days from DOS' },
             sources: ['Optum API', 'Availity API'],
+          },
+          {
+            rule_name: 'Service Line Eligibility Check',
+            decision_question: 'Are the denied CPT codes eligible for coverage under this plan when authorized?',
+            status: 'WARNING' as const,
+            explanation: `CPT codes ${deniedCpts} are eligible for coverage under ${payer}'s oncology benefit when prior authorization is obtained. The payer's LCD and benefit manual confirm these codes are covered for active oncology diagnoses. To restore eligibility for these line items: (1) obtain a retrospective authorization, or (2) file a formal appeal with clinical documentation demonstrating that the services met ${payer}'s medical necessity criteria.`,
+            data_used: { deniedCPTs: deniedCpts, coverageEligible: 'Yes — when authorized', resolutionPath: 'Retro auth or medical necessity appeal', diagnosisCodesSupport: 'Active oncology diagnosis' },
+            sources: ['Availity API', 'OncoEMR'],
+          },
+          {
+            rule_name: 'Timely Filing / Resubmission Check',
+            decision_question: 'Is the claim within the timely filing window for appeal or retro authorization?',
+            status: 'PASSED' as const,
+            explanation: `${payer} typically allows appeals and retro authorization requests within 180 days of the denial date. Denial date was ${claim.denialDate ? formatDate(claim.denialDate) : 'see EOB'}. Act promptly — contact ${payer} UM to initiate the retro auth process, or file a formal coverage appeal with supporting documentation within the timely filing window.`,
+            data_used: { denialDate: claim.denialDate ? formatDate(claim.denialDate) : 'see EOB', typicalAppealWindow: '180 days from denial', retroAuthWindow: '30–60 days from DOS', status: 'Within timely filing window — act promptly' },
+            sources: ['Candid PMS', 'Availity API'],
           },
         ] as RuleResult[],
         plan: {
           recommended_action:
-            `CO-50 medical necessity denial — ${payer} paid ${paidAmt} for ${paidCpts} but denied ${deniedCpts}. Recommended steps: (1) Pull treating physician's order and clinical notes for ${dos} confirming necessity of extended infusion and drug regimen. (2) Contact ${payer} Utilization Management to request a retrospective authorization for ${deniedCpts}. (3) If retro auth approved, resubmit with auth number. (4) If retro auth denied, prepare a formal medical necessity appeal with: physician certification, oncology treatment protocol, and applicable LCD reference. (5) Confirm patient diagnosis codes on claim align with LCD coverage criteria for these CPTs.`,
+            `CO-50 eligibility denial — ${payer} paid ${paidAmt} for ${paidCpts} but denied ${deniedCpts} as non-covered (missing prior authorization). Recommended steps: (1) Contact ${payer} Utilization Management to request a retrospective authorization for ${deniedCpts}; provide treating physician's certification of medical necessity. (2) Pull clinical notes and treatment protocol for ${dos} to support the retro auth request. (3) If retro auth is approved, resubmit the denied line items with the authorization number. (4) If retro auth is denied, file a formal coverage appeal with physician order, oncology treatment protocol, and applicable LCD reference confirming covered benefit status. (5) Ensure appeal or retro auth request is submitted within ${payer}'s timely filing window.`,
           flags: {
             DeniedCPTs: deniedCpts,
             PaidCPTs: paidCpts,
             AmountAlreadyPaid: paidAmt,
             PriorAuthOnFile: 'No — retro auth needed',
             RetroAuthWindow: 'Contact UM — typically 30–60 days from DOS',
-            Action: 'Request retro auth or submit medical necessity appeal',
+            Action: 'Request retro auth or submit coverage appeal',
           },
           documents_collected: [
             'Original EOB with CO-50 denial',
