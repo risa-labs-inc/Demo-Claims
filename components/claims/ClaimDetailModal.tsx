@@ -644,7 +644,11 @@ export function ClaimDetailModal({ claim, onClose, onUpdate }: ClaimDetailModalP
                         </div>
                         <div>
                           <span className="text-xs text-gray-500 uppercase">Denial Line Items</span>
-                          <p className="text-sm font-medium">{currentData.deniedLineItems || '-'}</p>
+                          <p className="text-sm font-medium">
+                            {currentData.denialCodes?.split(',')[0]?.trim() === 'CO-4'
+                              ? (currentData.deniedLineItems ?? '').split(',')[0]?.trim() || '-'
+                              : currentData.deniedLineItems || '-'}
+                          </p>
                         </div>
                       </div>
                       {currentData.denialDescription && (

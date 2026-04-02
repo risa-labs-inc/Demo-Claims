@@ -202,6 +202,8 @@ function RuleRow({ result }: { result: RuleResult }) {
                   const SOURCE_URLS: Record<string, string> = {
                     'OncoEMR': 'https://www.oncoemr.com',
                     'Availity API': 'https://www.availity.com',
+                    'Cigna Portal': 'https://cignaforhcp.cigna.com',
+                    'United Healthcare Portal': 'https://www.uhcprovider.com',
                     'Optum API': 'https://www.optum.com',
                     'Candid PMS': 'https://www.candidhealth.com',
                     'CMS NCCI': 'https://www.cms.gov/medicare/coding-billing/national-correct-coding-initiative-ncci-edits',
@@ -1118,6 +1120,13 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
     }
   })
 
+  // Payer-specific portal source — Cigna/UHC have their own portals; BCBS/Aetna use Availity
+  const payerPortalSource = (currentPlan ?? '').toLowerCase().includes('cigna')
+    ? 'Cigna Portal'
+    : (currentPlan ?? '').toLowerCase().includes('united')
+      ? 'United Healthcare Portal'
+      : 'Availity API'
+
   // Build contextual rule results based on the actual denial code
   const buildMockAnalysis = () => {
     const code = denial.denial_code
@@ -1795,6 +1804,34 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
             sources: ['CMS NCCI', 'Availity API'],
           },
           {
+            rule_name: 'Patient Billing History Check (CPT 99213)',
+            decision_question: `Has CPT ${emCode} been previously billed for this patient — with or without a modifier — and was it paid or denied?`,
+            status: 'MANUAL' as const,
+            explanation: `A bundling denial is present on CPT ${emCode}. Before resubmitting, pull the patient's billing history from ${payer}'s portal and Candid PMS to check whether ${emCode} has been previously billed for this patient on similar dates of service — both with and without modifiers. If ${emCode} was previously paid without a modifier, this may indicate a systemic billing pattern issue. If previously paid with modifier -25, that confirms the correct unbundling path. If previously denied with any modifier, review the denial pattern to inform the corrective action.`,
+            data_used: {
+              cptToCheck: emCode,
+              checkModifiers: 'With and without modifier (-25, -57, unmodified)',
+              lookbackPeriod: '12 months',
+              action: `Pull ${emCode} billing history from Candid PMS and ${payer} portal`,
+              paymentHistory: 'MANUAL REVIEW REQUIRED',
+            },
+            sources: ['Candid PMS', 'Availity API'],
+          },
+          {
+            rule_name: 'Modifier Selection — MR Review Required',
+            decision_question: `Based on the medical record, which modifier should be appended to CPT ${emCode} to correctly unbundle this claim?`,
+            status: 'MANUAL' as const,
+            explanation: `To unbundle this claim, CPT ${emCode} must be resubmitted with the correct modifier. Review the medical record (MR) to determine which applies:\n• Modifier -50 (Bilateral): Use if the MR indicates the E&M service was bilateral in nature.\n• Modifier -25 (Significant, separately identifiable E&M): Use if the MR indicates ${emCode} was NOT related to a decision for major surgery — i.e., it was a distinct E&M performed on the same day as the infusion.\n• Modifier -57 (Decision for Surgery): Use if the MR shows the E&M resulted in the decision to perform a major surgical procedure within 24 hours.\n\nOnce the correct modifier is confirmed, resubmit the corrected claim through the PMS using Claim Filing Indicator 7 (corrected claim resubmission).`,
+            data_used: {
+              'Modifier -50': 'Use if MR indicates bilateral service',
+              'Modifier -25': 'Use if E&M is significant and separately identifiable — NOT related to surgery',
+              'Modifier -57': 'Use if E&M led to decision for major surgery within 24 hours',
+              resubmissionMethod: 'Corrected Claim via PMS — Claim Filing Indicator 7',
+              action: 'Review MR to confirm correct modifier, then resubmit corrected claim',
+            },
+            sources: ['OncoEMR', 'Availity API'],
+          },
+          {
             rule_name: 'Modifier Justification (Distinct Service Evidence)',
             decision_question: 'Is the modifier billed valid and appropriate to override the NCCI bundling edit?',
             status: 'FAILED' as const,
@@ -1979,20 +2016,22 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
         ] as RuleResult[],
         plan: {
           recommended_action:
-            `CO-4 modifier mismatch denial — modifier -57 was appended to CPT ${emCode} instead of the correct modifier -25. ${payer} denied the claim because modifier -57 (Decision for Surgery) does not override NCCI bundling edits for same-day E&M and infusion billing. Recommended steps: (1) Pull the progress note for ${dos} and confirm documentation supports a separately identifiable E&M service beyond infusion management. (2) Resubmit a corrected claim replacing modifier -57 with modifier -25 on CPT ${emCode} (i.e., ${emCode}-25). (3) Attach the supporting clinical note to the corrected claim. (4) Confirm the corrected claim is submitted within ${payer}'s corrected claim timely filing window from DOS (${dos}).`,
+            `CO-4 modifier mismatch denial — modifier -57 was appended to CPT ${emCode} instead of the required modifier. ${payer} denied the claim because modifier -57 (Decision for Surgery) does not override NCCI bundling edits for same-day E&M and infusion billing. Recommended steps: (1) Pull the patient's billing history from ${payer}'s portal and Candid PMS — check if ${emCode} was previously billed with or without a modifier and whether it was paid. (2) Review the medical record (MR) to determine the correct modifier: use -50 if the service was bilateral, -25 if the E&M was a significant separately identifiable service unrelated to surgery, or -57 if the E&M resulted in the decision for a major surgical procedure within 24 hours. (3) Pull the progress note for ${dos} and confirm documentation supports the selected modifier. (4) Resubmit the corrected claim through the PMS using Claim Filing Indicator 7 (corrected claim resubmission) with the correct modifier on CPT ${emCode}. (5) Attach the supporting clinical note to the corrected claim.`,
           flags: {
-            DeniedCPTs: deniedCpts,
+            DeniedCPTs: emCode,
             IncorrectModifier: '-57 (Decision for Surgery)',
-            RequiredModifier: '-25 (Significant, separately identifiable E&M)',
-            NCCIBypassAvailable: 'Yes — modifier indicator 1 (requires -25)',
-            Action: `Resubmit corrected claim: ${emCode}-25 with clinical note`,
-            DocumentationStatus: 'Adequate — modifier correction is only fix needed',
+            ModifierOptions: '-50 (bilateral) | -25 (distinct E&M, no surgery) | -57 (decision for surgery)',
+            NCCIBypassAvailable: 'Yes — modifier indicator 1',
+            ResubmissionMethod: 'Corrected Claim via PMS — Claim Filing Indicator 7',
+            Action: `Review MR → confirm modifier → resubmit ${emCode} with correct modifier (CL indicator 7)`,
           },
           documents_collected: [
             'Original EOB with CO-4 denial',
-            `Progress note for ${dos} (supporting separate E&M)`,
-            'Corrected Claim (837P) with modifier -25 replacing modifier -57',
-            'NCCI Edit Reference confirming -25 modifier bypass',
+            `Patient billing history for CPT ${emCode} (12-month lookback)`,
+            `Medical record for ${dos} (to determine correct modifier)`,
+            `Progress note for ${dos} (supporting distinct E&M)`,
+            'Corrected Claim (837P) via PMS with Claim Filing Indicator 7',
+            'NCCI Edit Reference confirming modifier bypass eligibility',
             `${payer} modifier policy reference`,
           ],
         } as ActionPlan,
@@ -2244,7 +2283,10 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
       const t2 = setTimeout(() => {
         if (cancelled) return
         const { rules, plan } = buildMockAnalysis()
-        setRuleResults(rules)
+        setRuleResults(rules.map(r => ({
+          ...r,
+          sources: r.sources?.map(s => s === 'Availity API' ? payerPortalSource : s),
+        })))
         setActionPlan(plan)
       }, 400)
 
