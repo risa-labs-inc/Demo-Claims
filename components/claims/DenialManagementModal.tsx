@@ -991,7 +991,11 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
       if (c === 'CO-4' || c === 'CO-11') return 'Coding Denial'
       return 'Eligibility Denial'
     })(),
-    diagnosis_codes: ['C34.12', 'C50.911', 'Z51.11'],
+    diagnosis_codes: (() => {
+      const c = denialCode.split(',')[0]?.trim() ?? ''
+      if (c === 'CO-11') return ['Z79.899', 'C50.911', 'C34.12']
+      return ['C34.12', 'C50.911', 'Z51.11']
+    })(),
   }
 
   const claimNumber = activeTab === 'primary'
@@ -1051,10 +1055,16 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
     ? [...paidCptList, ...deniedCptList]
     : deniedCptList
 
+  // For CO-4 (modifier mismatch), analysis is only on the E&M line — filter to that code only
+  const isCO4ModifierCase = denial.denial_code === 'CO-4'
+  const displayCptList = isCO4ModifierCase
+    ? cptList.filter((_, i) => i === 0) // keep only the first code (E&M, e.g. 99213)
+    : cptList
+
   // Distribute charge by CPT rate weight so each line has a realistic distinct amount
   const billedByCode = distributeBilledAmounts(cptList, totalCharge)
   const isCO22WithPayment = denial.denial_code === 'CO-22' && primaryPaidAmount > 0
-  const mockServiceLines: ServiceLine[] = cptList.map((cpt, i) => {
+  const mockServiceLines: ServiceLine[] = displayCptList.map((cpt) => {
     const billed = billedByCode[cpt] ?? 0
 
     // Paid CPT lines for partially paid claims — show actual payment, no denial codes
@@ -1093,7 +1103,8 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
     return {
       dos: formatDate(claim.dateOfService),
       cpt_code: cpt,
-      modifiers: [],
+      // CO-4: show modifier 57 (the incorrect one that caused the denial) on the E&M line
+      modifiers: isCO4ModifierCase ? ['57'] : [],
       billed_amount: billed,
       allowed_amount: allowed,
       paid_amount: primaryPaid,
@@ -1960,7 +1971,7 @@ export function DenialManagementModal({ claim, onBack, onSave }: DenialManagemen
               dosInEmr: `${dos} — match`,
               primaryDxClaim: 'C34.12',
               primaryDxEmr: 'C34.12 — match',
-              secondaryDx: 'Z79.899, Z23 — consistent',
+              secondaryDx: 'C50.911, Z51.11 — consistent',
               source: 'Candid PMS, OncoEMR',
             },
             sources: ['Candid PMS', 'OncoEMR'],
